@@ -3,38 +3,57 @@ import React from 'react';
 
 import { HapticTab } from '@/components/haptic-tab';
 import { IconSymbol } from '@/components/ui/icon-symbol';
-import { Colors } from '@/constants/theme';
-import { useColorScheme } from '@/hooks/use-color-scheme';
+import { Brand, Palette } from '@/constants/theme';
 
 export default function TabLayout() {
-  const colorScheme = useColorScheme();
-
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
+        tabBarActiveTintColor: Brand.primary,
+        tabBarInactiveTintColor: Palette.textMuted,
+        tabBarStyle: {
+          backgroundColor: Palette.surface,
+          borderTopColor: Palette.border,
+          height: 60,
+          paddingBottom: 6,
+          paddingTop: 6,
+        },
+        tabBarLabelStyle: {
+          fontSize: 11,
+          fontWeight: '600',
+        },
         headerShown: false,
         tabBarButton: HapticTab,
       }}>
       <Tabs.Screen
         name="index"
         options={{
-          title: 'Home',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="house.fill" color={color} />,
+          title: 'Entrar',
+          href: null,
         }}
       />
       <Tabs.Screen
         name="dashboard"
         options={{
           title: 'Pesquisar',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="magnifyingglass" color={color} />,
+          tabBarIcon: ({ color }) => (
+            <IconSymbol size={26} name="magnifyingglass" color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="minhas-viagens"
+        options={{
+          title: 'Viagens',
+          tabBarIcon: ({ color }) => (
+            <IconSymbol size={26} name="ticket.fill" color={color} />
+          ),
         }}
       />
       <Tabs.Screen
         name="explore"
         options={{
-          title: 'Explore',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="paperplane.fill" color={color} />,
+          href: null,
         }}
       />
     </Tabs>

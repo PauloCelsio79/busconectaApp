@@ -9,9 +9,17 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "UIStatusBarStyle": "UIStatusBarStyleDarkContent",
+        "UIViewControllerBasedStatusBarAppearance": false
+      }
     },
     "android": {
+      "statusBar": {
+        "barStyle": "dark-content",
+        "backgroundColor": "#FFFFFF"
+      },
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",

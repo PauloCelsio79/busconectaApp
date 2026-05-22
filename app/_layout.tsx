@@ -1,8 +1,11 @@
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
-import { StatusBar } from 'expo-status-bar';
+import { useEffect } from 'react';
+import { Platform } from 'react-native';
+import * as SystemUI from 'expo-system-ui';
 import 'react-native-reanimated';
 
+import { Palette } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 
 export const unstable_settings = {
@@ -12,21 +15,23 @@ export const unstable_settings = {
 export default function RootLayout() {
   const colorScheme = useColorScheme();
 
+  useEffect(() => {
+    if (Platform.OS === 'android') {
+      void SystemUI.setBackgroundColorAsync(Palette.surface);
+    }
+  }, []);
+
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <Stack>
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
-        <Stack.Screen
-          name="minhas-viagens"
-          options={{ title: 'Minhas viagens' }}
-        />
-        <Stack.Screen
-          name="meus-tickets"
-          options={{ title: 'Meus tickets' }}
-        />
+      <Stack screenOptions={{ headerShown: false, animation: 'slide_from_right' }}>
+        <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="register" />
+        <Stack.Screen name="resultados" />
+        <Stack.Screen name="reserva" />
+        <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
+        <Stack.Screen name="minhas-viagens" />
+        <Stack.Screen name="meus-tickets" />
       </Stack>
-      <StatusBar style="auto" />
     </ThemeProvider>
   );
 }

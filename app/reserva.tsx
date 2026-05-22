@@ -1,61 +1,152 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useLocalSearchParams } from 'expo-router';
-import { useState } from 'react';
-import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { router, useLocalSearchParams } from 'expo-router';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  Alert,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+
+import { AppTextInput } from '@/components/ui/app-text-input';
+import { FocusedStatusBar } from '@/components/ui/focused-status-bar';
+import { PrimaryButton } from '@/components/ui/primary-button';
+import { ScreenHeader } from '@/components/ui/screen-header';
+import { SectionTitle } from '@/components/ui/section-title';
+import { StepIndicator } from '@/components/ui/step-indicator';
+import { Brand, Palette, Radius, Shadow, Spacing, Typography } from '@/constants/theme';
+
+const TOTAL_ASSENTOS = 30;
+const ASSENTOS_POR_FILA = 4;
+const ASSENTOS_OCUPADOS = new Set([3, 7, 12, 15, 22]);
+
+function param(value?: string | string[]) {
+  if (Array.isArray(value)) return value[0] ?? '';
+  return value ?? '';
+}
+
+function parsePreco(value: string): number {
+  const cleaned = value.replace(/\s/g, '').replace(/\./g, '').replace(',', '.');
+  const n = parseFloat(cleaned);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function formatPreco(value: number): string {
+  const [intPart, decPart = '00'] = value.toFixed(2).split('.');
+  const withDots = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  return `${withDots},${decPart}`;
+}
+
+function newPassengerId() {
+  return `p-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+interface Passageiro {
+  id: string;
+  nome: string;
+  bilhete: string;
+  nascimento?: string;
+  nacionalidade: 'Nacional' | 'Estrangeiro';
+  incluido: boolean;
+}
+
+const MAX_PASSAGEIROS = 10;
+
+interface ReservaSalva {
+  id: string;
+  userEmail: string | null;
+  viagem: {
+    agencia?: string | string[];
+    origem?: string | string[];
+    destino?: string | string[];
+    data?: string | string[];
+    hora?: string | string[];
+    preco?: string | string[];
+    duracao?: string | string[];
+    embarque?: string | string[];
+    desembarque?: string | string[];
+  };
+  assentos: number[];
+  passageiros: Passageiro[];
+  status: 'ativa' | 'cancelada' | 'remarcada';
+  criadaEm: string;
+}
 
 export default function Reserva() {
   const params = useLocalSearchParams();
+  const agencia = param(params.agencia);
+  const origem = param(params.origem);
+  const destino = param(params.destino);
+  const data = param(params.data);
+  const hora = param(params.hora);
+  const horaChegada = param(params.horaChegada);
+  const preco = param(params.preco);
+  const duracao = param(params.duracao);
+  const embarque = param(params.embarque);
+  const desembarque = param(params.desembarque);
 
-  /* ======================
-     CONFIGURAÇÕES
-  ======================= */
-  const TOTAL_ASSENTOS = 30;
-  const ASSENTOS_POR_FILA = 4;
-
-  /* ======================
-     STATES
-  ======================= */
-  const [numPassageiros, setNumPassageiros] = useState(1);
-  const [numPassageirosInput, setNumPassageirosInput] = useState('1');
-  const [passageiros, setPassageiros] = useState([{ nome: '', bilhete: '' }]);
+  const [passageiros, setPassageiros] = useState<Passageiro[]>([]);
   const [assentosSelecionados, setAssentosSelecionados] = useState<number[]>([]);
-  const [pagamento, setPagamento] = useState<'referencia' | 'transferencia'>(
-    'referencia'
-  );
+  const [pagamento, setPagamento] = useState<'referencia' | 'transferencia'>('referencia');
   const [processando, setProcessando] = useState(false);
   const [pago, setPago] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [showPassengerModal, setShowPassengerModal] = useState(false);
+  const [editingPassengerId, setEditingPassengerId] = useState<string | null>(null);
+  const [modalNome, setModalNome] = useState('');
+  const [modalBI, setModalBI] = useState('');
+  const [modalNascimento, setModalNascimento] = useState('');
+  const [modalNacionalidade, setModalNacionalidade] = useState<'Nacional' | 'Estrangeiro'>('Nacional');
+  const [passengerError, setPassengerError] = useState('');
+  const [seatHint, setSeatHint] = useState('');
+  const [saveError, setSaveError] = useState('');
 
-  interface Passageiro {
-    nome: string;
-    bilhete: string;
-  }
+  const precoUnitario = parsePreco(preco);
+  const passageirosIncluidos = useMemo(
+    () => passageiros.filter((p) => p.incluido && p.nome.trim() && p.bilhete.trim()),
+    [passageiros]
+  );
+  const numPassageiros = passageirosIncluidos.length;
+  const totalPreco = precoUnitario * numPassageiros;
+  const totalFormatado = formatPreco(totalPreco);
 
-  interface ReservaSalva {
-    id: string;
-    userEmail: string | null;
-    viagem: {
-      agencia?: string | string[];
-      origem?: string | string[];
-      destino?: string | string[];
-      data?: string | string[];
-      hora?: string | string[];
-      preco?: string | string[];
-      duracao?: string | string[];
-      embarque?: string | string[];
-    };
-    assentos: number[];
-    passageiros: Passageiro[];
-    status: 'ativa' | 'cancelada' | 'remarcada';
-    criadaEm: string;
-  }
+  const assentosCompletos =
+    numPassageiros > 0 && assentosSelecionados.length === numPassageiros;
+  const passageiroPreenchido = numPassageiros > 0;
+
+  useEffect(() => {
+    setAssentosSelecionados((prev) =>
+      prev.length > numPassageiros ? prev.slice(0, numPassageiros) : prev
+    );
+  }, [numPassageiros]);
+
+  const steps = useMemo(
+    () => [
+      { label: 'Passageiros', done: passageiroPreenchido },
+      { label: 'Assento', done: assentosCompletos },
+      { label: 'Pagamento', done: pago },
+    ],
+    [passageiroPreenchido, assentosCompletos, pago]
+  );
 
   async function salvarReservaLocal(assentos: number[], passageirosLista: Passageiro[]) {
     setSaving(true);
+    setSaveError('');
     try {
       const currentUserEmail = await AsyncStorage.getItem('currentUserEmail');
       const json = await AsyncStorage.getItem('reservas');
       const existentes: ReservaSalva[] = json ? JSON.parse(json) : [];
+
+      const totalGuardar = formatPreco(
+        parsePreco(param(params.preco)) * passageirosLista.length
+      );
 
       const novaReserva: ReservaSalva = {
         id: Date.now().toString(),
@@ -66,9 +157,10 @@ export default function Reserva() {
           destino: params.destino,
           data: params.data,
           hora: params.hora,
-          preco: params.preco,
+          preco: totalGuardar,
           duracao: params.duracao,
           embarque: params.embarque,
+          desembarque: params.desembarque,
         },
         assentos,
         passageiros: passageirosLista,
@@ -76,44 +168,34 @@ export default function Reserva() {
         criadaEm: new Date().toISOString(),
       };
 
-      await AsyncStorage.setItem(
-        'reservas',
-        JSON.stringify([novaReserva, ...existentes])
-      );
-    } catch (error) {
-      alert('Pagamento confirmado, mas não foi possível guardar a reserva localmente.');
+      await AsyncStorage.setItem('reservas', JSON.stringify([novaReserva, ...existentes]));
+    } catch {
+      setSaveError('Pagamento confirmado, mas não foi possível guardar localmente.');
     } finally {
       setSaving(false);
     }
   }
 
-  /* ======================
-     FUNÇÕES
-  ======================= */
-  function atualizarPassageiros(qtd: number) {
-    if (qtd < 1) return;
+  function toggleAssento(numero: number) {
+    setSeatHint('');
 
-    const lista = [];
-    for (let i = 0; i < qtd; i++) {
-      lista.push({ nome: '', bilhete: '' });
+    if (ASSENTOS_OCUPADOS.has(numero)) {
+      setSeatHint('Este assento já está ocupado.');
+      return;
     }
 
-    setNumPassageiros(qtd);
-    setNumPassageirosInput(String(qtd));
-    setPassageiros(lista);
-    setAssentosSelecionados([]); // resetar assentos
-  }
-
-  function toggleAssento(numero: number) {
     if (assentosSelecionados.includes(numero)) {
-      setAssentosSelecionados(
-        assentosSelecionados.filter((a) => a !== numero)
-      );
+      setAssentosSelecionados(assentosSelecionados.filter((a) => a !== numero));
+      return;
+    }
+
+    if (numPassageiros === 0) {
+      setSeatHint('Adicione e selecione pelo menos um passageiro.');
       return;
     }
 
     if (assentosSelecionados.length >= numPassageiros) {
-      alert(`Só pode selecionar ${numPassageiros} assento(s).`);
+      setSeatHint(`Selecione apenas ${numPassageiros} assento(s) — um por passageiro.`);
       return;
     }
 
@@ -121,292 +203,1173 @@ export default function Reserva() {
   }
 
   function efetuarPagamento() {
-    if (assentosSelecionados.length !== numPassageiros) {
-      alert('Selecione um assento para cada passageiro.');
+    if (!passageiroPreenchido) {
+      setSeatHint('Adicione os dados do passageiro primeiro.');
+      return;
+    }
+    if (!assentosCompletos) {
+      setSeatHint('Selecione um assento para continuar.');
       return;
     }
 
+    setSeatHint('');
     setProcessando(true);
 
     setTimeout(async () => {
-      await salvarReservaLocal(assentosSelecionados, passageiros);
+      await salvarReservaLocal(
+        assentosSelecionados,
+        passageirosIncluidos.map(({ id, incluido, ...rest }) => rest)
+      );
       setProcessando(false);
       setPago(true);
-    }, 3000);
+    }, 2500);
   }
 
-  /* ======================
-     UI
-  ======================= */
+  function resetModalFields() {
+    setModalNome('');
+    setModalBI('');
+    setModalNascimento('');
+    setModalNacionalidade('Nacional');
+    setPassengerError('');
+  }
+
+  function openPassengerModal(passengerId?: string) {
+    if (passengerId) {
+      const p = passageiros.find((item) => item.id === passengerId);
+      if (!p) return;
+      setEditingPassengerId(passengerId);
+      setModalNome(p.nome);
+      setModalBI(p.bilhete);
+      setModalNascimento(p.nascimento ?? '');
+      setModalNacionalidade(p.nacionalidade);
+    } else {
+      if (passageiros.length >= MAX_PASSAGEIROS) {
+        setSeatHint(`Máximo de ${MAX_PASSAGEIROS} passageiros por reserva.`);
+        return;
+      }
+      setEditingPassengerId(null);
+      resetModalFields();
+    }
+    setPassengerError('');
+    setShowPassengerModal(true);
+  }
+
+  function closePassengerModal() {
+    setShowPassengerModal(false);
+    setEditingPassengerId(null);
+    resetModalFields();
+  }
+
+  function handleSavePassenger() {
+    if (!modalNome.trim() || !modalBI.trim()) {
+      setPassengerError(
+        modalNacionalidade === 'Nacional'
+          ? 'Informe nome completo e número do BI.'
+          : 'Informe nome completo e número do passaporte.'
+      );
+      return;
+    }
+    setPassengerError('');
+
+    const dados: Passageiro = {
+      id: editingPassengerId ?? newPassengerId(),
+      nome: modalNome.trim(),
+      bilhete: modalBI.trim(),
+      nascimento: modalNascimento.trim() || undefined,
+      nacionalidade: modalNacionalidade,
+      incluido: true,
+    };
+
+    if (editingPassengerId) {
+      setPassageiros((prev) =>
+        prev.map((p) => (p.id === editingPassengerId ? { ...dados, incluido: p.incluido } : p))
+      );
+    } else {
+      setPassageiros((prev) => [...prev, dados]);
+    }
+
+    closePassengerModal();
+    setSeatHint('');
+  }
+
+  function togglePassageiroIncluido(id: string) {
+    setPassageiros((prev) =>
+      prev.map((p) => (p.id === id ? { ...p, incluido: !p.incluido } : p))
+    );
+    setSeatHint('');
+  }
+
+  function excluirPassageiro(id: string) {
+    const p = passageiros.find((item) => item.id === id);
+    Alert.alert(
+      'Remover passageiro',
+      `Deseja excluir ${p?.nome ?? 'este passageiro'} da reserva?`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Excluir',
+          style: 'destructive',
+          onPress: () => {
+            setPassageiros((prev) => prev.filter((item) => item.id !== id));
+            setSeatHint('');
+          },
+        },
+      ]
+    );
+  }
+
+  function documentoLabel(p: Passageiro) {
+    const tipo = p.nacionalidade === 'Nacional' ? 'Nativo' : 'Estrangeiro';
+    const doc = p.nacionalidade === 'Nacional' ? 'BI' : 'Passaporte';
+    return `${tipo} | ${doc}: ${p.bilhete}`;
+  }
+
+  function renderAssento(numero: number) {
+    const ocupado = ASSENTOS_OCUPADOS.has(numero);
+    const selecionado = assentosSelecionados.includes(numero);
+    const bloqueado = numPassageiros === 0;
+
+    return (
+      <Pressable
+        key={numero}
+        style={[
+          styles.seat,
+          ocupado && styles.seatOccupied,
+          selecionado && styles.seatSelected,
+          bloqueado && styles.seatDisabled,
+        ]}
+        onPress={() => toggleAssento(numero)}
+        disabled={ocupado || bloqueado}
+        accessibilityRole="button"
+        accessibilityLabel={`Assento ${numero}${ocupado ? ', ocupado' : selecionado ? ', selecionado' : ', disponível'}`}
+        accessibilityState={{ selected: selecionado, disabled: ocupado }}
+      >
+        <Text
+          style={[
+            styles.seatText,
+            (ocupado || selecionado) && styles.seatTextActive,
+          ]}
+        >
+          {numero}
+        </Text>
+      </Pressable>
+    );
+  }
+
   return (
-    <ScrollView style={styles.container}>
-      <Text style={styles.title}>Resumo da Viagem</Text>
+    <View style={styles.page}>
+      <FocusedStatusBar iconStyle="dark" backgroundColor={Palette.surface} />
+      <SafeAreaView edges={['top']} style={styles.headerSafe}>
+        <View style={styles.headerCard}>
+          <ScreenHeader
+            title="Confirmar reserva"
+            subtitle={data || 'Data não definida'}
+          />
+          <StepIndicator steps={steps} />
 
-      <Text>{params.origem} → {params.destino}</Text>
-      <Text>Agência: {params.agencia}</Text>
-      {params.data ? <Text>Data: {params.data}</Text> : null}
-      <Text>Hora: {params.hora}</Text>
-      <Text>Duração: {params.duracao}</Text>
-      <Text>Preço: {params.preco}</Text>
+          <View style={styles.routePill}>
+            <Text style={styles.routePillLabel}>Viagem selecionada</Text>
+            <Text style={styles.routePillValue}>
+              {origem} → {destino} · {data || '—'}
+            </Text>
+          </View>
+        </View>
+      </SafeAreaView>
 
-      {/* ======================
-         ESCOLHA DE ASSENTOS
-      ======================= */}
-      <View style={styles.section}>
-        <Text style={styles.subtitle}>Escolha de Assentos</Text>
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
+        <View style={styles.summaryCard}>
+          <View style={styles.summaryTop}>
+            <View style={styles.summaryLeft}>
+              {agencia ? (
+                <View style={styles.agencyBadge}>
+                  <Text style={styles.agencyBadgeText}>{agencia}</Text>
+                </View>
+              ) : null}
+              <Text style={styles.summaryLabel}>Viagem de ida</Text>
+              <Text style={styles.summaryRoute}>
+                {origem} → {destino}
+              </Text>
+            </View>
+            <View style={styles.priceBlock}>
+              <Text style={styles.priceLabel}>
+                {numPassageiros > 0
+                  ? `${preco} Kz × ${numPassageiros}`
+                  : 'Por passageiro'}
+              </Text>
+              <Text style={styles.summaryPrice}>
+                {numPassageiros > 0 ? `${totalFormatado} Kz` : `${preco || '0'} Kz`}
+              </Text>
+            </View>
+          </View>
 
-        <View style={styles.bus}>
-          {Array.from({ length: TOTAL_ASSENTOS / ASSENTOS_POR_FILA }).map(
-            (_, fila) => {
+          <View style={styles.summaryTimeline}>
+            <View style={styles.summaryCol}>
+              <Text style={styles.summaryTime}>{hora || '—'}</Text>
+              <Text style={styles.summaryMeta}>Embarque</Text>
+              <Text style={styles.summaryPlace} numberOfLines={2}>
+                {embarque}
+              </Text>
+            </View>
+            <View style={styles.summaryCenter}>
+              <Text style={styles.summaryDuration}>{duracao}</Text>
+            </View>
+            <View style={[styles.summaryCol, styles.summaryColEnd]}>
+              <Text style={styles.summaryTime}>{horaChegada || hora || '—'}</Text>
+              <Text style={styles.summaryMeta}>Chegada</Text>
+              <Text style={styles.summaryPlace} numberOfLines={2}>
+                {desembarque || '—'}
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        <View style={styles.block}>
+          <SectionTitle
+            title="Adicionar passageiro"
+            hint={numPassageiros > 0 ? `${numPassageiros} na reserva` : 'Passo 1 de 3'}
+          />
+
+          <View style={styles.passengerCard}>
+          {passageiros.length === 0 ? (
+            <Text style={styles.passengerEmpty}>
+              Nenhum passageiro adicionado. Toque em «Informe mais passageiros» para começar.
+            </Text>
+          ) : (
+            passageiros.map((p, index) => (
+              <View
+                key={p.id}
+                style={[
+                  styles.passengerRow,
+                  index === passageiros.length - 1 && styles.passengerRowLast,
+                ]}
+              >
+                <Pressable
+                  style={[styles.checkbox, p.incluido && styles.checkboxChecked]}
+                  onPress={() => togglePassageiroIncluido(p.id)}
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked: p.incluido }}
+                  accessibilityLabel={`Incluir ${p.nome} na reserva`}
+                >
+                  {p.incluido ? <Text style={styles.checkboxMark}>✓</Text> : null}
+                </Pressable>
+
+                <View style={styles.passengerRowBody}>
+                  <Text style={styles.passengerName}>{p.nome}</Text>
+                  <Text style={styles.passengerDoc}>{documentoLabel(p)}</Text>
+                </View>
+
+                <View style={styles.passengerActions}>
+                  <Pressable
+                    style={styles.editBtn}
+                    onPress={() => openPassengerModal(p.id)}
+                    accessibilityLabel={`Editar ${p.nome}`}
+                  >
+                    <Text style={styles.editBtnIcon}>✎</Text>
+                    <Text style={styles.editBtnText}>Editar</Text>
+                  </Pressable>
+                  <Pressable
+                    style={styles.deleteBtn}
+                    onPress={() => excluirPassageiro(p.id)}
+                    accessibilityLabel={`Excluir ${p.nome}`}
+                  >
+                    <Text style={styles.deleteBtnText}>×</Text>
+                  </Pressable>
+                </View>
+              </View>
+            ))
+          )}
+
+          <Pressable
+            style={({ pressed }) => [
+              styles.addMoreRow,
+              pressed && styles.cardPressed,
+            ]}
+            onPress={() => openPassengerModal()}
+            accessibilityRole="button"
+            accessibilityLabel="Adicionar mais passageiros"
+          >
+            <Text style={styles.addMoreIcon}>👤+</Text>
+            <Text style={styles.addMoreText}>Informe mais passageiros</Text>
+            <Text style={styles.addMoreArrow}>›</Text>
+          </Pressable>
+          </View>
+
+          {numPassageiros > 0 ? (
+            <View style={styles.totalBanner}>
+              <View>
+                <Text style={styles.totalBannerLabel}>Total estimado</Text>
+                <Text style={styles.totalBannerDetail}>
+                  {numPassageiros === 1 ? 'passageiro' : 'passageiros'}
+                </Text>
+              </View>
+              <Text style={styles.totalBannerValue}>{totalFormatado} Kz</Text>
+            </View>
+          ) : null}
+
+          <View style={styles.infoBanner}>
+            <Text style={styles.infoBannerText}>
+              Menores de 5 anos estão isentos de pagamento de bilhete.
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.block}>
+          <SectionTitle
+            title="Escolher assento"
+            hint={
+              numPassageiros > 0
+                ? `${assentosSelecionados.length}/${numPassageiros} assento(s)`
+                : 'Adicione passageiros primeiro'
+            }
+          />
+          <View style={styles.legendRow}>
+            <View style={styles.legendItem}>
+              <View style={[styles.legendDot, styles.legendFree]} />
+              <Text style={styles.legendLabel}>Livre</Text>
+            </View>
+            <View style={styles.legendItem}>
+              <View style={[styles.legendDot, styles.legendBusy]} />
+              <Text style={styles.legendLabel}>Ocupado</Text>
+            </View>
+            <View style={styles.legendItem}>
+              <View style={[styles.legendDot, styles.legendPick]} />
+              <Text style={styles.legendLabel}>Seu</Text>
+            </View>
+          </View>
+
+          <View style={styles.busFront}>
+            <Text style={styles.busFrontText}>Frente do autocarro</Text>
+          </View>
+
+          <View style={styles.busLayout}>
+            {Array.from({ length: TOTAL_ASSENTOS / ASSENTOS_POR_FILA }).map((_, fila) => {
               const base = fila * ASSENTOS_POR_FILA + 1;
-
               return (
-                <View key={fila} style={styles.row}>
-                  {/* Lado esquerdo */}
-                  <View style={styles.side}>
-                    {[base, base + 1].map((n) => (
-                      <TouchableOpacity
-                        key={n}
-                        style={[
-                          styles.assento,
-                          assentosSelecionados.includes(n) &&
-                            styles.assentoSelecionado,
-                        ]}
-                        onPress={() => toggleAssento(n)}
-                      >
-                        <Text style={styles.assentoTexto}>{n}</Text>
-                      </TouchableOpacity>
-                    ))}
+                <View key={fila} style={styles.busRow}>
+                  <View style={styles.busSide}>
+                    {renderAssento(base)}
+                    {renderAssento(base + 1)}
                   </View>
-
-                  {/* Corredor */}
-                  <View style={styles.corridor} />
-
-                  {/* Lado direito */}
-                  <View style={styles.side}>
-                    {[base + 2, base + 3].map((n) => (
-                      <TouchableOpacity
-                        key={n}
-                        style={[
-                          styles.assento,
-                          assentosSelecionados.includes(n) &&
-                            styles.assentoSelecionado,
-                        ]}
-                        onPress={() => toggleAssento(n)}
-                      >
-                        <Text style={styles.assentoTexto}>{n}</Text>
-                      </TouchableOpacity>
-                    ))}
+                  <View style={styles.aisle} />
+                  <View style={styles.busSide}>
+                    {renderAssento(base + 2)}
+                    {renderAssento(base + 3)}
                   </View>
                 </View>
               );
-            }
-          )}
+            })}
+          </View>
+
+          <Text style={styles.seatSummary}>
+            {numPassageiros === 0
+              ? 'Selecione passageiros acima para escolher assentos'
+              : assentosSelecionados.length > 0
+                ? `Assentos (${assentosSelecionados.length}/${numPassageiros}): ${assentosSelecionados.join(', ')}`
+                : `Selecione ${numPassageiros} assento(s) — um por passageiro`}
+          </Text>
+
+          {passageirosIncluidos.length > 0 && assentosSelecionados.length > 0 ? (
+            <View style={styles.seatAssignList}>
+              {passageirosIncluidos.map((p, index) => (
+                <Text key={p.id} style={styles.seatAssignItem}>
+                  {p.nome.split(' ')[0]}: assento{' '}
+                  {assentosSelecionados[index] ?? '—'}
+                </Text>
+              ))}
+            </View>
+          ) : null}
+
+          {seatHint ? <Text style={styles.seatHint}>{seatHint}</Text> : null}
         </View>
 
-        <Text style={styles.info}>
-  Assentos selecionados:{' '}
-  {Array.isArray(assentosSelecionados) && assentosSelecionados.length > 0
-    ? assentosSelecionados.join(', ')
-    : 'Nenhum'}
-</Text>
+        <View style={styles.block}>
+          <SectionTitle title="Pagamento" hint="Passo 3 de 3" />
+          <Pressable
+            style={[
+              styles.payOption,
+              pagamento === 'referencia' && styles.payOptionActive,
+            ]}
+            onPress={() => setPagamento('referencia')}
+          >
+            <View style={styles.payOptionHeader}>
+              <Text style={styles.payOptionTitle}>Pagamento por referência</Text>
+              <View style={styles.recommendedTag}>
+                <Text style={styles.recommendedText}>Recomendado</Text>
+              </View>
+            </View>
+            <Text style={styles.payOptionDesc}>
+              Receba a referência Multicaixa e pague no ATM ou app bancário.
+            </Text>
+          </Pressable>
 
-      </View>
+          <Pressable
+            style={[
+              styles.payOption,
+              pagamento === 'transferencia' && styles.payOptionActive,
+            ]}
+            onPress={() => setPagamento('transferencia')}
+          >
+            <Text style={styles.payOptionTitle}>Afrimoney</Text>
+            <Text style={styles.payOptionDesc}>
+              Pagamento rápido pela carteira móvel Afrimoney.
+            </Text>
+          </Pressable>
+        </View>
 
-      {/* ======================
-         PASSAGEIROS
-      ======================= */}
-      <View style={styles.section}>
-        <Text style={styles.subtitle}>Passageiros</Text>
+        {saveError ? (
+          <View style={styles.errorBanner}>
+            <Text style={styles.errorBannerText}>{saveError}</Text>
+          </View>
+        ) : null}
 
-        <TextInput
-          style={styles.input}
-          keyboardType="numeric"
-          placeholder="Número de passageiros"
-          value={numPassageirosInput}
-          onChangeText={(v) => {
-            // Permitir limpar o campo enquanto o utilizador escreve
-            setNumPassageirosInput(v);
-
-            const valor = Number(v);
-            if (!isNaN(valor) && valor > 0) {
-              atualizarPassageiros(valor);
-            } else if (v === '') {
-              setNumPassageiros(0);
-              setPassageiros([]);
-              setAssentosSelecionados([]);
-            }
-          }}
-          
-        />
-
-        {passageiros.map((p, i) => (
-          <View key={i}>
-            <TextInput
-              style={styles.input}
-              placeholder={`Nome do passageiro ${i + 1}`}
-              value={p.nome}
-              onChangeText={(t) => {
-                const copia = [...passageiros];
-                copia[i].nome = t;
-                setPassageiros(copia);
-              }}
+        {pago ? (
+          <View style={styles.successCard}>
+            <Text style={styles.successIcon}>✓</Text>
+            <Text style={styles.successTitle}>Reserva confirmada!</Text>
+            <Text style={styles.successMessage}>
+              Bilhete guardado. Consulte em Minhas viagens ou mostre o QR no embarque.
+            </Text>
+            <PrimaryButton
+              title="Ver minhas viagens"
+              onPress={() => router.replace('/minhas-viagens')}
+              style={styles.successBtn}
             />
-            <TextInput
-              style={styles.input}
-              placeholder="Nº do bilhete"
-              value={p.bilhete}
-              onChangeText={(t) => {
-                const copia = [...passageiros];
-                copia[i].bilhete = t;
-                setPassageiros(copia);
-              }}
+            <PrimaryButton
+              title="Abrir bilhete (QR)"
+              onPress={() => router.push('/meus-tickets')}
+              variant="outline"
             />
           </View>
-        ))}
-      </View>
-
-      {/* ======================
-         PAGAMENTO
-      ======================= */}
-      <View style={styles.section}>
-        <Text style={styles.subtitle}>Método de Pagamento</Text>
-
-        <TouchableOpacity onPress={() => setPagamento('referencia')}>
-          <Text
-            style={
-              pagamento === 'referencia' ? styles.selected : styles.option
-            }
-          >
-             Referência
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity onPress={() => setPagamento('transferencia')}>
-          <Text
-            style={
-              pagamento === 'transferencia' ? styles.selected : styles.option
-            }
-          >
-             Transferência
-          </Text>
-        </TouchableOpacity>
-      </View>
+        ) : null}
+      </ScrollView>
 
       {!pago ? (
-        <TouchableOpacity
-          style={[
-            styles.button,
-            assentosSelecionados.length !== numPassageiros && {
-              opacity: 0.5,
-            },
-          ]}
-          disabled={assentosSelecionados.length !== numPassageiros}
-          onPress={efetuarPagamento}
+        <SafeAreaView edges={['bottom']} style={styles.footer}>
+          <View style={styles.footerInner}>
+            <View>
+              <Text style={styles.footerLabel}>
+                {numPassageiros > 0
+                  ? `Total · ${numPassageiros} passageiro(s)`
+                  : 'Total a pagar'}
+              </Text>
+              <Text style={styles.footerPrice}>
+                {numPassageiros > 0 ? `${totalFormatado} Kz` : `${preco || '0'} Kz`}
+              </Text>
+            </View>
+            <PrimaryButton
+              title={processando || saving ? 'A processar...' : 'Pagar agora'}
+              onPress={efetuarPagamento}
+              loading={processando || saving}
+              disabled={!assentosCompletos || !passageiroPreenchido}
+              style={styles.footerBtn}
+            />
+          </View>
+        </SafeAreaView>
+      ) : null}
+
+      <Modal visible={showPassengerModal} transparent animationType="fade">
+        <KeyboardAvoidingView
+          style={styles.modalKeyboard}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         >
-          <Text style={styles.buttonText}>
-            {processando || saving
-              ? 'Processando pagamento...'
-              : 'Efetuar Pagamento'}
-          </Text>
-        </TouchableOpacity>
-      ) : (
-        <Text style={styles.success}>
-           Pagamento efetuado com sucesso!
-        </Text>
-      )}
-    </ScrollView>
+        <Pressable style={styles.modalOverlay} onPress={closePassengerModal}>
+          <Pressable style={styles.modalSheet} onPress={() => {}}>
+            <View style={styles.modalHead}>
+              <Text style={styles.modalTitle}>
+                {editingPassengerId ? 'Editar passageiro' : 'Novo passageiro'}
+              </Text>
+              <TouchableOpacity
+                onPress={closePassengerModal}
+                accessibilityLabel="Fechar"
+                hitSlop={12}
+              >
+                <Text style={styles.modalClose}>×</Text>
+              </TouchableOpacity>
+            </View>
+
+            {passengerError ? (
+              <View style={styles.modalErrorBox}>
+                <Text style={styles.modalErrorText}>{passengerError}</Text>
+              </View>
+            ) : null}
+
+            <ScrollView
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+            >
+              <AppTextInput
+                label="Nome completo"
+                placeholder="Como no documento"
+                value={modalNome}
+                onChangeText={setModalNome}
+                autoCapitalize="words"
+              />
+              <AppTextInput
+                label={
+                  modalNacionalidade === 'Nacional'
+                    ? 'Bilhete de identidade'
+                    : 'Passaporte'
+                }
+                placeholder={
+                  modalNacionalidade === 'Nacional'
+                    ? 'Número do BI'
+                    : 'Número do passaporte'
+                }
+                value={modalBI}
+                onChangeText={setModalBI}
+              />
+              <View style={styles.modalRow}>
+                <View style={styles.modalCol}>
+                  <AppTextInput
+                    label="Nascimento"
+                    placeholder="DD/MM/AAAA"
+                    value={modalNascimento}
+                    onChangeText={setModalNascimento}
+                  />
+                </View>
+                <View style={styles.modalCol}>
+                  <Text style={styles.modalFieldLabel}>Nacionalidade</Text>
+                  <Pressable
+                    style={styles.nationalityChip}
+                    onPress={() =>
+                      setModalNacionalidade(
+                        modalNacionalidade === 'Nacional' ? 'Estrangeiro' : 'Nacional'
+                      )
+                    }
+                  >
+                    <Text style={styles.nationalityText}>{modalNacionalidade}</Text>
+                    <Text style={styles.nationalityArrow}>⇅</Text>
+                  </Pressable>
+                </View>
+              </View>
+              <PrimaryButton
+                title={editingPassengerId ? 'Guardar alterações' : 'Adicionar passageiro'}
+                onPress={handleSavePassenger}
+              />
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+        </KeyboardAvoidingView>
+      </Modal>
+    </View>
   );
 }
 
-/* ======================
-   ESTILOS
-======================= */
 const styles = StyleSheet.create({
-  container: {
+  page: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
-    padding: 16,
+    backgroundColor: Palette.background,
   },
-  title: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    marginBottom: 10,
+  headerSafe: {
+    backgroundColor: Palette.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: Palette.border,
   },
-  section: {
-    marginTop: 20,
+  headerCard: {
+    paddingHorizontal: Spacing.lg,
+    paddingBottom: Spacing.lg,
   },
-  subtitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginBottom: 10,
+  routePill: {
+    backgroundColor: Palette.surfaceMuted,
+    borderRadius: Radius.md,
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    marginTop: Spacing.lg,
+    borderLeftWidth: 3,
+    borderLeftColor: Brand.primary,
   },
-  input: {
-    backgroundColor: '#fff',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 10,
+  routePillLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: Brand.primary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 2,
   },
-  option: {
-    padding: 10,
+  routePillValue: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: Palette.text,
   },
-  selected: {
-    padding: 10,
-    fontWeight: 'bold',
-    color: '#1e90ff',
+  scroll: {
+    flex: 1,
   },
-  button: {
-    backgroundColor: '#1e90ff',
-    padding: 16,
-    borderRadius: 10,
-    alignItems: 'center',
-    marginTop: 30,
+  scrollContent: {
+    padding: Spacing.lg,
+    paddingBottom: 120,
   },
-  buttonText: {
-    color: '#fff',
-    fontWeight: 'bold',
+  summaryCard: {
+    backgroundColor: Palette.surface,
+    borderRadius: Radius.xl,
+    padding: Spacing.lg,
+    marginBottom: Spacing.lg,
+    borderWidth: 1,
+    borderColor: Palette.border,
+    ...Shadow.card,
   },
-  success: {
-    marginTop: 30,
-    color: 'green',
-    fontWeight: 'bold',
-    textAlign: 'center',
-  },
-  bus: {
-    backgroundColor: '#f9f9f9',
-    padding: 10,
-    borderRadius: 10,
-  },
-  row: {
+  summaryTop: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 10,
+    marginBottom: Spacing.lg,
   },
-  side: {
+  summaryLeft: {
+    flex: 1,
+    paddingRight: Spacing.md,
+  },
+  agencyBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: Brand.primaryLight,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 2,
+    borderRadius: Radius.pill,
+    marginBottom: Spacing.sm,
+  },
+  agencyBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: Brand.primaryDark,
+  },
+  summaryLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: Brand.primary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  summaryRoute: {
+    ...Typography.title,
+    fontSize: 18,
+    color: Palette.text,
+    marginTop: Spacing.xs,
+  },
+  priceBlock: {
+    alignItems: 'flex-end',
+  },
+  priceLabel: {
+    fontSize: 11,
+    color: Palette.textMuted,
+  },
+  summaryPrice: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: Brand.primary,
+  },
+  summaryTimeline: {
     flexDirection: 'row',
-    gap: 8,
+    alignItems: 'flex-start',
+    paddingTop: Spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: Palette.border,
   },
-  corridor: {
-    width: 20,
+  summaryCol: {
+    flex: 1,
   },
-  assento: {
-    width: 45,
-    height: 45,
-    backgroundColor: '#e0e0e0',
+  summaryColEnd: {
+    alignItems: 'flex-end',
+  },
+  summaryTime: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: Palette.text,
+  },
+  summaryMeta: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: Brand.primary,
+    marginTop: 2,
+  },
+  summaryPlace: {
+    fontSize: 11,
+    color: Palette.textSecondary,
+    marginTop: Spacing.xs,
+  },
+  summaryCenter: {
+    paddingHorizontal: Spacing.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 72,
+  },
+  summaryDuration: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: Brand.primaryDark,
+    backgroundColor: Palette.surfaceMuted,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: Spacing.xs,
+    borderRadius: Radius.pill,
+    overflow: 'hidden',
+  },
+  block: {
+    marginBottom: Spacing.xl,
+  },
+  passengerCard: {
+    backgroundColor: Palette.surface,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderColor: Palette.border,
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.md,
+    marginBottom: Spacing.md,
+    ...Shadow.card,
+  },
+  passengerEmpty: {
+    fontSize: 13,
+    color: Palette.textMuted,
+    marginBottom: Spacing.lg,
+    lineHeight: 20,
+    paddingVertical: Spacing.sm,
+  },
+  passengerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: Spacing.lg,
+    paddingBottom: Spacing.lg,
+    borderBottomWidth: 1,
+    borderBottomColor: Palette.border,
+  },
+  passengerRowLast: {
+    borderBottomWidth: 0,
+    marginBottom: 0,
+    paddingBottom: Spacing.sm,
+  },
+  totalBanner: {
+    backgroundColor: Brand.primaryLight,
+    borderRadius: Radius.md,
+    padding: Spacing.md,
+    marginBottom: Spacing.md,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: Spacing.sm,
+    borderLeftWidth: 3,
+    borderLeftColor: Brand.primary,
+  },
+  totalBannerLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: Brand.primaryDark,
+    marginBottom: 2,
+  },
+  totalBannerDetail: {
+    fontSize: 12,
+    color: Palette.textSecondary,
+  },
+  totalBannerValue: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: Brand.primary,
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
     borderRadius: 6,
+    borderWidth: 2,
+    borderColor: Brand.primary,
+    marginRight: Spacing.md,
+    backgroundColor: Brand.white,
+  },
+  checkboxChecked: {
+    backgroundColor: Brand.primary,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  assentoSelecionado: {
-    backgroundColor: '#1e90ff',
+  checkboxMark: {
+    color: Brand.white,
+    fontSize: 14,
+    fontWeight: '800',
+    lineHeight: 16,
   },
-  assentoTexto: {
-    fontWeight: 'bold',
-    color: '#000',
+  passengerRowBody: {
+    flex: 1,
+    paddingRight: Spacing.sm,
   },
-  info: {
-    marginTop: 10,
+  passengerName: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: Palette.text,
+    marginBottom: 4,
+  },
+  passengerDoc: {
     fontSize: 13,
-    color: '#555',
+    color: Palette.textSecondary,
+    lineHeight: 18,
+  },
+  passengerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+  },
+  editBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: Spacing.xs,
+    paddingHorizontal: Spacing.xs,
+  },
+  editBtnIcon: {
+    fontSize: 14,
+    color: Brand.primary,
+    marginRight: 2,
+  },
+  editBtnText: {
+    fontSize: 13,
+    color: Palette.textSecondary,
+    fontWeight: '600',
+  },
+  deleteBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: Brand.primaryLight,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: Spacing.xs,
+  },
+  deleteBtnText: {
+    fontSize: 20,
+    lineHeight: 22,
+    color: Brand.primary,
+    fontWeight: '700',
+  },
+  addMoreRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: Spacing.md,
+    marginTop: Spacing.sm,
+  },
+  addMoreIcon: {
+    fontSize: 18,
+    color: Palette.textSecondary,
+    marginRight: Spacing.md,
+    width: 28,
+  },
+  addMoreText: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '800',
+    color: Brand.primary,
+  },
+  addMoreArrow: {
+    fontSize: 22,
+    color: Brand.primary,
+    fontWeight: '300',
+  },
+  seatAssignList: {
+    backgroundColor: Palette.surfaceMuted,
+    borderRadius: Radius.md,
+    padding: Spacing.md,
+    marginTop: Spacing.sm,
+    gap: Spacing.xs,
+  },
+  seatAssignItem: {
+    fontSize: 12,
+    color: Palette.textSecondary,
+    fontWeight: '600',
+  },
+  cardPressed: {
+    opacity: 0.9,
+  },
+  infoBanner: {
+    backgroundColor: Brand.primaryLight,
+    borderRadius: Radius.md,
+    padding: Spacing.md,
+    borderLeftWidth: 3,
+    borderLeftColor: Brand.primary,
+  },
+  infoBannerText: {
+    fontSize: 12,
+    color: Brand.primaryDark,
+    lineHeight: 18,
+  },
+  legendRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginBottom: Spacing.md,
+  },
+  legendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+  },
+  legendDot: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+  },
+  legendFree: {
+    backgroundColor: Palette.surfaceMuted,
+    borderWidth: 1,
+    borderColor: Palette.border,
+  },
+  legendBusy: {
+    backgroundColor: Palette.textSecondary,
+  },
+  legendPick: {
+    backgroundColor: Palette.success,
+  },
+  legendLabel: {
+    fontSize: 12,
+    color: Palette.textSecondary,
+  },
+  busFront: {
+    alignItems: 'center',
+    marginBottom: Spacing.sm,
+  },
+  busFrontText: {
+    fontSize: 11,
+    color: Palette.textMuted,
+    fontWeight: '600',
+  },
+  busLayout: {
+    backgroundColor: Palette.surface,
+    borderRadius: Radius.xl,
+    padding: Spacing.lg,
+    borderWidth: 1,
+    borderColor: Palette.border,
+    ...Shadow.card,
+  },
+  busRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: Spacing.md,
+  },
+  busSide: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+  },
+  aisle: {
+    width: 28,
+  },
+  seat: {
+    width: 46,
+    height: 46,
+    borderRadius: Radius.md,
+    backgroundColor: Palette.surfaceMuted,
+    borderWidth: 1,
+    borderColor: Palette.border,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  seatOccupied: {
+    backgroundColor: Palette.textSecondary,
+    borderColor: Palette.textSecondary,
+    opacity: 0.7,
+  },
+  seatSelected: {
+    backgroundColor: Palette.success,
+    borderColor: Palette.success,
+  },
+  seatDisabled: {
+    opacity: 0.4,
+  },
+  seatText: {
+    fontWeight: '700',
+    color: Palette.text,
+    fontSize: 14,
+  },
+  seatTextActive: {
+    color: Brand.white,
+  },
+  seatSummary: {
+    marginTop: Spacing.md,
+    fontSize: 13,
+    color: Palette.textSecondary,
+    textAlign: 'center',
+  },
+  seatHint: {
+    marginTop: Spacing.sm,
+    fontSize: 13,
+    color: Brand.primary,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  payOption: {
+    backgroundColor: Palette.surface,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderColor: Palette.border,
+    padding: Spacing.lg,
+    marginBottom: Spacing.md,
+  },
+  payOptionActive: {
+    borderColor: Brand.primary,
+    borderWidth: 2,
+    backgroundColor: Brand.primaryLight,
+  },
+  payOptionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    marginBottom: Spacing.xs,
+  },
+  payOptionTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: Palette.text,
+  },
+  recommendedTag: {
+    backgroundColor: Brand.accentLight,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 2,
+    borderRadius: Radius.pill,
+  },
+  recommendedText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: Brand.accent,
+  },
+  payOptionDesc: {
+    fontSize: 12,
+    color: Palette.textSecondary,
+    lineHeight: 18,
+  },
+  errorBanner: {
+    backgroundColor: Brand.primaryLight,
+    borderRadius: Radius.md,
+    padding: Spacing.md,
+    marginBottom: Spacing.lg,
+    borderLeftWidth: 3,
+    borderLeftColor: Brand.primary,
+  },
+  errorBannerText: {
+    color: Brand.primary,
+    fontWeight: '600',
+    fontSize: 13,
+  },
+  successCard: {
+    backgroundColor: Brand.accentLight,
+    borderRadius: Radius.xl,
+    padding: Spacing.xl,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: Brand.accent,
+    marginBottom: Spacing.xxl,
+  },
+  successIcon: {
+    fontSize: 44,
+    color: Brand.accent,
+    marginBottom: Spacing.md,
+  },
+  successTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: Palette.text,
+    marginBottom: Spacing.sm,
+  },
+  successMessage: {
+    textAlign: 'center',
+    color: Palette.textSecondary,
+    lineHeight: 22,
+    marginBottom: Spacing.xl,
+  },
+  successBtn: {
+    alignSelf: 'stretch',
+    marginBottom: Spacing.md,
+  },
+  footer: {
+    backgroundColor: Palette.surface,
+    borderTopWidth: 1,
+    borderTopColor: Palette.border,
+    ...Shadow.card,
+  },
+  footerInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
+    gap: Spacing.lg,
+  },
+  footerLabel: {
+    fontSize: 11,
+    color: Palette.textMuted,
+  },
+  footerPrice: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: Brand.primary,
+  },
+  footerBtn: {
+    flex: 1,
+  },
+  modalKeyboard: {
+    flex: 1,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'center',
+    padding: Spacing.xl,
+  },
+  modalSheet: {
+    backgroundColor: Palette.surface,
+    borderRadius: Radius.xl,
+    padding: Spacing.xl,
+    maxHeight: '88%',
+  },
+  modalHead: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: Spacing.lg,
+  },
+  modalTitle: {
+    ...Typography.title,
+    fontSize: 18,
+    color: Palette.text,
+  },
+  modalClose: {
+    fontSize: 28,
+    color: Brand.primary,
+    lineHeight: 28,
+  },
+  modalErrorBox: {
+    backgroundColor: Brand.primaryLight,
+    borderRadius: Radius.md,
+    padding: Spacing.md,
+    marginBottom: Spacing.md,
+  },
+  modalErrorText: {
+    color: Brand.primary,
+    fontWeight: '600',
+    fontSize: 13,
+  },
+  modalRow: {
+    flexDirection: 'row',
+    gap: Spacing.md,
+  },
+  modalCol: {
+    flex: 1,
+  },
+  modalFieldLabel: {
+    ...Typography.label,
+    color: Palette.text,
+    marginBottom: Spacing.sm,
+  },
+  nationalityChip: {
+    height: 52,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderColor: Palette.border,
+    backgroundColor: Palette.surfaceMuted,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: Spacing.lg,
+    marginBottom: Spacing.lg,
+  },
+  nationalityText: {
+    fontSize: 15,
+    color: Palette.text,
+    fontWeight: '600',
+  },
+  nationalityArrow: {
+    color: Brand.primary,
+    fontWeight: '700',
   },
 });

@@ -1,7 +1,22 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
-import { StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import {
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+
+import { AppTextInput } from '@/components/ui/app-text-input';
+import { FocusedStatusBar } from '@/components/ui/focused-status-bar';
+import { PrimaryButton } from '@/components/ui/primary-button';
+import { ScreenHeader } from '@/components/ui/screen-header';
+import { Brand, Palette, Radius, Spacing } from '@/constants/theme';
 
 interface StoredUser {
   name: string;
@@ -30,20 +45,23 @@ export default function RegisterScreen() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [formError, setFormError] = useState('');
 
   async function handleRegister() {
-    if (!name || !email || !password || !confirmPassword) {
-      alert('Preencha todos os campos obrigatórios.');
+    setFormError('');
+
+    if (!name.trim() || !email.trim() || !password || !confirmPassword) {
+      setFormError('Preencha todos os campos obrigatórios.');
       return;
     }
 
     if (password.length < 6) {
-      alert('A senha deve ter pelo menos 6 caracteres.');
+      setFormError('A palavra-passe deve ter pelo menos 6 caracteres.');
       return;
     }
 
     if (password !== confirmPassword) {
-      alert('As senhas não coincidem.');
+      setFormError('As palavras-passe não coincidem.');
       return;
     }
 
@@ -55,7 +73,7 @@ export default function RegisterScreen() {
       );
 
       if (alreadyExists) {
-        alert('Já existe um utilizador com este e-mail.');
+        setFormError('Já existe uma conta com este e-mail.');
         return;
       }
 
@@ -65,124 +83,128 @@ export default function RegisterScreen() {
         password,
       };
 
-      const updated = [...users, newUser];
-      await saveUsers(updated);
+      await saveUsers([...users, newUser]);
       await AsyncStorage.setItem('currentUserEmail', newUser.email);
 
-      alert('Conta criada com sucesso! Faça login para continuar.');
-      router.replace('/');
-    } catch (error) {
-      alert('Ocorreu um erro ao criar a conta. Tente novamente.');
+      router.replace('/dashboard');
+    } catch {
+      setFormError('Não foi possível criar a conta. Tente novamente.');
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Criar conta</Text>
-      <Text style={styles.subtitle}>
-        Registe-se para reservar e gerir as suas viagens.
-      </Text>
-
-      <TextInput
-        style={styles.input}
-        placeholder="Nome completo"
-        value={name}
-        onChangeText={setName}
-      />
-
-      <TextInput
-        style={styles.input}
-        placeholder="E-mail"
-        keyboardType="email-address"
-        autoCapitalize="none"
-        value={email}
-        onChangeText={setEmail}
-      />
-
-      <TextInput
-        style={styles.input}
-        placeholder="Senha"
-        secureTextEntry
-        value={password}
-        onChangeText={setPassword}
-      />
-
-      <TextInput
-        style={styles.input}
-        placeholder="Confirmar senha"
-        secureTextEntry
-        value={confirmPassword}
-        onChangeText={setConfirmPassword}
-      />
-
-      <TouchableOpacity
-        style={styles.button}
-        onPress={handleRegister}
-        disabled={loading}
+    <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+      <FocusedStatusBar iconStyle="dark" backgroundColor={Palette.surface} />
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <Text style={styles.buttonText}>
-          {loading ? 'A criar conta...' : 'Criar conta'}
-        </Text>
-      </TouchableOpacity>
+        <ScrollView
+          contentContainerStyle={styles.scroll}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <ScreenHeader
+            title="Criar conta"
+            subtitle="Registe-se para reservar e gerir viagens"
+            onBack={() => router.back()}
+          />
 
-      <TouchableOpacity
-        style={styles.secondaryButton}
-        onPress={() => router.back()}
-        disabled={loading}
-      >
-        <Text style={styles.secondaryText}>Já tenho conta</Text>
-      </TouchableOpacity>
-    </View>
+          {formError ? (
+            <View style={styles.errorBanner} accessibilityRole="alert">
+              <Text style={styles.errorBannerText}>{formError}</Text>
+            </View>
+          ) : null}
+
+          <AppTextInput
+            label="Nome completo"
+            placeholder="O seu nome"
+            autoCapitalize="words"
+            value={name}
+            onChangeText={setName}
+          />
+
+          <AppTextInput
+            label="E-mail"
+            placeholder="exemplo@email.com"
+            keyboardType="email-address"
+            autoCapitalize="none"
+            value={email}
+            onChangeText={setEmail}
+          />
+
+          <AppTextInput
+            label="Palavra-passe"
+            placeholder="Mínimo 6 caracteres"
+            secureTextEntry
+            value={password}
+            onChangeText={setPassword}
+            hint="Use letras e números para maior segurança"
+          />
+
+          <AppTextInput
+            label="Confirmar palavra-passe"
+            placeholder="Repita a palavra-passe"
+            secureTextEntry
+            value={confirmPassword}
+            onChangeText={setConfirmPassword}
+          />
+
+          <PrimaryButton
+            title={loading ? 'A criar conta...' : 'Criar conta'}
+            onPress={handleRegister}
+            loading={loading}
+          />
+
+          <TouchableOpacity
+            style={styles.linkRow}
+            onPress={() => router.back()}
+            disabled={loading}
+          >
+            <Text style={styles.linkText}>Já tenho conta — entrar</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  safe: {
     flex: 1,
-    justifyContent: 'center',
-    padding: 24,
-    backgroundColor: '#ffffff',
+    backgroundColor: Palette.background,
   },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    textAlign: 'center',
-    marginBottom: 8,
+  flex: {
+    flex: 1,
   },
-  subtitle: {
-    textAlign: 'center',
-    marginBottom: 24,
-    color: '#666',
+  scroll: {
+    flexGrow: 1,
+    paddingHorizontal: Spacing.xl,
+    paddingBottom: Spacing.xxl,
   },
-  input: {
-    height: 50,
-    borderWidth: 1,
-    borderColor: '#ccc',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    marginBottom: 14,
+  errorBanner: {
+    backgroundColor: Brand.primaryLight,
+    borderRadius: Radius.md,
+    padding: Spacing.md,
+    marginBottom: Spacing.lg,
+    borderLeftWidth: 3,
+    borderLeftColor: Brand.primary,
   },
-  button: {
-    backgroundColor: '#1e90ff',
-    height: 50,
-    borderRadius: 8,
-    justifyContent: 'center',
+  errorBannerText: {
+    color: Brand.primary,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  linkRow: {
+    marginTop: Spacing.xl,
     alignItems: 'center',
-    marginTop: 8,
+    paddingVertical: Spacing.md,
   },
-  buttonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  secondaryButton: {
-    marginTop: 16,
-  },
-  secondaryText: {
-    textAlign: 'center',
-    color: '#1e90ff',
+  linkText: {
+    color: Brand.primary,
+    fontWeight: '700',
+    fontSize: 15,
   },
 });
-

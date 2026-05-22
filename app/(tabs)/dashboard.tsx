@@ -1,7 +1,20 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Modal, Pressable, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import {
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+
+import { FocusedStatusBar } from '@/components/ui/focused-status-bar';
+import { Brand, Palette, Radius, Spacing } from '@/constants/theme';
 
 interface StoredUser {
   name: string;
@@ -10,6 +23,10 @@ interface StoredUser {
 }
 
 export default function Dashboard() {
+  const today = new Date();
+  const currentYear = today.getFullYear();
+  const todayStart = new Date(currentYear, today.getMonth(), today.getDate());
+
   const [origem, setOrigem] = useState('');
   const [destino, setDestino] = useState('');
   const [dataIda, setDataIda] = useState('');
@@ -17,15 +34,20 @@ export default function Dashboard() {
   const [idaVolta, setIdaVolta] = useState(false);
   const [dateError, setDateError] = useState('');
   const [datePickerOpen, setDatePickerOpen] = useState<null | 'ida' | 'regresso'>(null);
-  const [calendarMonth, setCalendarMonth] = useState(new Date().getMonth());
+  const [calendarMonth, setCalendarMonth] = useState(today.getMonth());
+  const [calendarYear, setCalendarYear] = useState(currentYear);
   const [userName, setUserName] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [formError, setFormError] = useState('');
 
   useEffect(() => {
     async function loadUserName() {
       try {
         const currentUserEmail = await AsyncStorage.getItem('currentUserEmail');
-        if (!currentUserEmail) return;
+        if (!currentUserEmail) {
+          router.replace('/');
+          return;
+        }
 
         const json = await AsyncStorage.getItem('users');
         if (!json) return;
@@ -43,9 +65,6 @@ export default function Dashboard() {
     void loadUserName();
   }, []);
 
-  const currentYear = new Date().getFullYear();
-  const today = new Date();
-  const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
   const monthNames = [
     'Janeiro',
     'Fevereiro',
@@ -65,27 +84,39 @@ export default function Dashboard() {
   const formatDayMonth = (day: number, month: number) =>
     `${String(day).padStart(2, '0')}/${String(month + 1).padStart(2, '0')}`;
 
-  const parseDateString = (value: string) => {
+  const getClosestFutureDate = (day: number, month: number, floorDate: Date = todayStart) => {
+    const maxYear = currentYear + 5;
+
+    for (let year = currentYear; year <= maxYear; year += 1) {
+      const date = new Date(year, month - 1, day);
+      if (
+        date.getFullYear() !== year ||
+        date.getMonth() !== month - 1 ||
+        date.getDate() !== day
+      ) {
+        continue;
+      }
+
+      if (date >= floorDate) {
+        return date;
+      }
+    }
+
+    return null;
+  };
+
+  const parseDateString = (value: string, minDate?: Date) => {
     const parts = value.split('/').map((item) => Number(item.trim()));
     if (parts.length !== 2) return null;
 
     const [day, month] = parts;
     if (!day || !month) return null;
 
-    const date = new Date(currentYear, month - 1, day);
-    if (
-      date.getFullYear() !== currentYear ||
-      date.getMonth() !== month - 1 ||
-      date.getDate() !== day
-    ) {
-      return null;
-    }
-
-    return date;
+    return getClosestFutureDate(day, month, minDate ?? todayStart);
   };
 
   const validateDate = (value: string, minDate?: Date) => {
-    const date = parseDateString(value);
+    const date = parseDateString(value, minDate);
     const maxYear = currentYear + 5;
 
     if (!date) {
@@ -111,14 +142,18 @@ export default function Dashboard() {
     const idaDate = parseDateString(dataIda);
     const baseMonth =
       field === 'regresso' && idaDate ? idaDate.getMonth() : today.getMonth();
+    const baseYear =
+      field === 'regresso' && idaDate ? idaDate.getFullYear() : today.getFullYear();
+
     setCalendarMonth(baseMonth);
+    setCalendarYear(baseYear);
     setDatePickerOpen(field);
   };
 
   const selectedIdaDate = parseDateString(dataIda);
 
   const canSelectDay = (day: number) => {
-    const date = new Date(currentYear, calendarMonth, day);
+    const date = new Date(calendarYear, calendarMonth, day);
     if (date < todayStart) {
       return false;
     }
@@ -148,8 +183,25 @@ export default function Dashboard() {
     setDatePickerOpen(null);
   };
 
+  function swapOrigemDestino() {
+    setOrigem(destino);
+    setDestino(origem);
+    setFormError('');
+  }
+
   const handleSubmit = () => {
     setDateError('');
+    setFormError('');
+
+    if (!origem.trim() || !destino.trim()) {
+      setFormError('Indique a origem e o destino da viagem.');
+      return;
+    }
+
+    if (origem.trim().toLowerCase() === destino.trim().toLowerCase()) {
+      setFormError('Origem e destino devem ser diferentes.');
+      return;
+    }
 
     const idaError = validateDate(dataIda);
     if (idaError) {
@@ -166,8 +218,8 @@ export default function Dashboard() {
       }
     }
 
-    if (!origem || !destino || !dataIda) {
-      alert('Preencha origem, destino e data de ida.');
+    if (!dataIda) {
+      setFormError('Selecione a data de ida.');
       return;
     }
 
@@ -182,13 +234,18 @@ export default function Dashboard() {
     });
   };
 
-  const firstWeekdayOffset = (new Date(currentYear, calendarMonth, 1).getDay() + 6) % 7;
-  const monthDays = new Date(currentYear, calendarMonth + 1, 0).getDate();
+  const firstWeekdayOffset = (new Date(calendarYear, calendarMonth, 1).getDay() + 6) % 7;
+  const monthDays = new Date(calendarYear, calendarMonth + 1, 0).getDate();
 
   return (
     <View style={styles.container}>
+      <FocusedStatusBar
+        iconStyle="light"
+        backgroundColor={Brand.primaryDark}
+      />
       <View style={styles.heroBackground} />
 
+      <SafeAreaView style={styles.safeTop} edges={['top']}>
       <View style={styles.topButtons}>
         <TouchableOpacity
           style={styles.circleButton}
@@ -199,49 +256,76 @@ export default function Dashboard() {
           <View style={styles.menuLine} />
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.circleButton}>
-          <View style={styles.dot} />
-          <View style={styles.dot} />
-          <View style={styles.dot} />
+        <TouchableOpacity
+          style={styles.circleButton}
+          onPress={() => router.push('/meus-tickets')}
+          accessibilityLabel="Meus bilhetes"
+        >
+          <Text style={styles.ticketIcon}>🎫</Text>
         </TouchableOpacity>
       </View>
+      </SafeAreaView>
 
       {menuOpen && (
-        <View style={styles.menu}>
-          <TouchableOpacity
-            style={styles.menuItem}
-            onPress={() => {
-              setMenuOpen(false);
-              router.push('/minhas-viagens');
-            }}
-          >
-            <Text style={styles.menuItemText}>Minhas viagens</Text>
-          </TouchableOpacity>
+        <Pressable style={styles.menuOverlay} onPress={() => setMenuOpen(false)}>
+          <Pressable style={styles.menuPanel} onPress={() => {}}>
+            <TouchableOpacity style={styles.menuCloseButton} onPress={() => setMenuOpen(false)}>
+              <Text style={styles.menuCloseText}>×</Text>
+            </TouchableOpacity>
 
-          <TouchableOpacity
-            style={styles.menuItem}
-            onPress={() => {
-              setMenuOpen(false);
-              router.push('/meus-tickets');
-            }}
-          >
-            <Text style={styles.menuItemText}>Meus tickets</Text>
-          </TouchableOpacity>
+            <View style={styles.menuHeader}>
+              <Text style={styles.menuHeaderText}>Menu</Text>
+            </View>
 
-          <TouchableOpacity
-            style={styles.menuItem}
-            onPress={async () => {
-              setMenuOpen(false);
-              await AsyncStorage.removeItem('currentUserEmail');
-              router.replace('/');
-            }}
-          >
-            <Text style={styles.menuItemText}>Terminar sessão</Text>
-          </TouchableOpacity>
-        </View>
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => {
+                setMenuOpen(false);
+                router.push('/minhas-viagens');
+              }}
+            >
+              <Text style={styles.menuIcon}>👤</Text>
+              <Text style={styles.menuItemText}>Perfil</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => {
+                setMenuOpen(false);
+                router.push('/minhas-viagens');
+              }}
+            >
+              <Text style={styles.menuIcon}>🧳</Text>
+              <Text style={styles.menuItemText}>Viagens</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => {
+                setMenuOpen(false);
+              }}
+            >
+              <Text style={styles.menuIcon}>🎉</Text>
+              <Text style={styles.menuItemText}>Promoções</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => {
+                setMenuOpen(false);
+              }}
+            >
+              <Text style={styles.menuIcon}>🎧</Text>
+              <Text style={styles.menuItemText}>Suporte</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
       )}
 
       <View style={styles.card}>
+        {userName ? (
+          <Text style={styles.greeting}>Olá, {userName.split(' ')[0]} 👋</Text>
+        ) : null}
         <View style={styles.brandingRow}>
           <Text style={styles.brandingTitle}>Bus</Text>
           <Text style={[styles.brandingTitle, styles.brandingAccent]}>Conecta</Text>
@@ -250,22 +334,43 @@ export default function Dashboard() {
           Viagem com <Text style={styles.highlight}>praticidade</Text>
         </Text>
 
-        <View style={styles.form}>
-          <TextInput
-            style={styles.input}
-            placeholder="Origem"
-            placeholderTextColor="#545151"
-            value={origem}
-            onChangeText={setOrigem}
-          />
-
-          <TextInput
-            style={styles.input}
-            placeholder="Destino"
-            placeholderTextColor="#545151"
-            value={destino}
-            onChangeText={setDestino}
-          />
+        <ScrollView
+          style={styles.formScroll}
+          contentContainerStyle={styles.form}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.routeRow}>
+            <TextInput
+              style={[styles.input, styles.routeInput]}
+              placeholder="Origem"
+              placeholderTextColor={Palette.textMuted}
+              value={origem}
+              onChangeText={(v) => {
+                setOrigem(v);
+                setFormError('');
+              }}
+              accessibilityLabel="Cidade de origem"
+            />
+            <TouchableOpacity
+              style={styles.swapButton}
+              onPress={swapOrigemDestino}
+              accessibilityLabel="Trocar origem e destino"
+            >
+              <Text style={styles.swapIcon}>⇅</Text>
+            </TouchableOpacity>
+            <TextInput
+              style={[styles.input, styles.routeInput]}
+              placeholder="Destino"
+              placeholderTextColor={Palette.textMuted}
+              value={destino}
+              onChangeText={(v) => {
+                setDestino(v);
+                setFormError('');
+              }}
+              accessibilityLabel="Cidade de destino"
+            />
+          </View>
 
           <TouchableOpacity style={styles.inputButton} onPress={() => openDatePicker('ida')}>
             <Text style={[styles.inputText, dataIda ? styles.inputValue : styles.placeholderText]}>
@@ -306,25 +411,47 @@ export default function Dashboard() {
                   <Text style={styles.calendarTitle}>Escolha dia e mês</Text>
                   <View style={styles.monthRow}>
                     <TouchableOpacity
-                      disabled={
-                        calendarMonth <=
+                    disabled={
+                      calendarYear ===
+                        ((datePickerOpen === 'regresso' && selectedIdaDate)
+                          ? selectedIdaDate.getFullYear()
+                          : today.getFullYear()) &&
+                      calendarMonth <=
                         ((datePickerOpen === 'regresso' && selectedIdaDate)
                           ? selectedIdaDate.getMonth()
                           : today.getMonth())
-                      }
-                      onPress={() => setCalendarMonth((prev) => Math.max(prev - 1, 0))}
-                      style={styles.monthButton}
-                    >
-                      <Text style={styles.monthButtonText}>{'<'}</Text>
-                    </TouchableOpacity>
-                    <Text style={styles.monthName}>{monthNames[calendarMonth]}</Text>
-                    <TouchableOpacity
-                      disabled={calendarMonth >= 11}
-                      onPress={() => setCalendarMonth((prev) => Math.min(prev + 1, 11))}
-                      style={styles.monthButton}
-                    >
-                      <Text style={styles.monthButtonText}>{'>'}</Text>
-                    </TouchableOpacity>
+                    }
+                    onPress={() => {
+                      setCalendarMonth((prevMonth) => {
+                        if (prevMonth === 0) {
+                          setCalendarYear((prevYear) => Math.max(prevYear - 1, today.getFullYear()));
+                          return 11;
+                        }
+                        return prevMonth - 1;
+                      });
+                    }}
+                    style={styles.monthButton}
+                  >
+                    <Text style={styles.monthButtonText}>{'<'}</Text>
+                  </TouchableOpacity>
+                  <Text style={styles.monthName}>{monthNames[calendarMonth]}</Text>
+                  <TouchableOpacity
+                    disabled={
+                      calendarYear >= currentYear + 5 && calendarMonth >= 11
+                    }
+                    onPress={() => {
+                      setCalendarMonth((prevMonth) => {
+                        if (prevMonth === 11) {
+                          setCalendarYear((prevYear) => Math.min(prevYear + 1, currentYear + 5));
+                          return 0;
+                        }
+                        return prevMonth + 1;
+                      });
+                    }}
+                    style={styles.monthButton}
+                  >
+                    <Text style={styles.monthButtonText}>{'>'}</Text>
+                  </TouchableOpacity>
                   </View>
                 </View>
                 <View style={styles.weekdaysRow}>
@@ -359,36 +486,84 @@ export default function Dashboard() {
                     );
                   })}
                 </View>
-              </View>
             </Pressable>
+          </Pressable>
           </Modal>
 
+          {formError ? <Text style={styles.errorText}>{formError}</Text> : null}
           {dateError ? <Text style={styles.errorText}>{dateError}</Text> : null}
 
-          <TouchableOpacity style={styles.button} onPress={handleSubmit}>
-            <Text style={styles.buttonText}>Buscar</Text>
+          <TouchableOpacity
+            style={styles.button}
+            onPress={handleSubmit}
+            accessibilityRole="button"
+            accessibilityLabel="Pesquisar viagens"
+          >
+            <Text style={styles.buttonText}>Buscar viagens</Text>
           </TouchableOpacity>
-        </View>
+        </ScrollView>
       </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#9C0415' },
+  container: { flex: 1, backgroundColor: Brand.primaryDark },
+  safeTop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 10,
+  },
+  greeting: {
+    fontSize: 14,
+    color: Palette.textSecondary,
+    marginBottom: Spacing.sm,
+    fontWeight: '600',
+  },
+  formScroll: {
+    flex: 1,
+  },
+  routeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    marginBottom: Spacing.lg,
+  },
+  routeInput: {
+    flex: 1,
+    marginBottom: 0,
+  },
+  swapButton: {
+    width: 44,
+    height: 44,
+    borderRadius: Radius.md,
+    backgroundColor: Brand.primaryLight,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: Brand.primary,
+  },
+  swapIcon: {
+    fontSize: 20,
+    color: Brand.primary,
+    fontWeight: '700',
+  },
+  ticketIcon: {
+    fontSize: 20,
+  },
   heroBackground: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
     height: '55%',
-    backgroundColor: '#9C0415',
+    backgroundColor: Brand.primaryDark,
   },
   topButtons: {
-    position: 'absolute',
-    top: 52,
-    left: 24,
-    right: 24,
+    paddingHorizontal: 24,
+    paddingTop: Spacing.sm,
     flexDirection: 'row',
     justifyContent: 'space-between',
     zIndex: 10,
@@ -415,27 +590,68 @@ const styles = StyleSheet.create({
     marginVertical: 2,
     borderRadius: 2,
   },
-  menu: {
+  menuOverlay: {
     position: 'absolute',
-    top: 110,
-    left: 24,
-    right: 24,
-    backgroundColor: '#ffffff',
-    borderRadius: 16,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    shadowColor: '#000',
-    shadowOpacity: 0.12,
-    shadowRadius: 12,
-    elevation: 8,
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.35)',
     zIndex: 20,
   },
+  menuPanel: {
+    width: '70%',
+    maxWidth: 320,
+    height: '100%',
+    backgroundColor: '#fff',
+    paddingTop: 40,
+    paddingHorizontal: 24,
+    paddingBottom: 24,
+    borderTopRightRadius: 24,
+    borderBottomRightRadius: 24,
+    shadowColor: '#000',
+    shadowOpacity: 0.16,
+    shadowRadius: 24,
+    elevation: 12,
+  },
+  menuCloseButton: {
+    position: 'absolute',
+    top: 16,
+    right: 16,
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 20,
+    backgroundColor: '#F8F8F8',
+  },
+  menuCloseText: {
+    fontSize: 24,
+    color: '#C6082A',
+    lineHeight: 24,
+  },
+  menuHeader: {
+    marginBottom: 28,
+  },
+  menuHeaderText: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#191919',
+  },
   menuItem: {
-    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 16,
+    gap: 12,
+  },
+  menuIcon: {
+    fontSize: 18,
+    width: 24,
   },
   menuItemText: {
-    fontSize: 15,
-    color: '#333',
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#191919',
   },
   card: {
     position: 'absolute',
@@ -462,7 +678,7 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   brandingAccent: {
-    color: '#C6082A',
+    color: Brand.primary,
   },
   brandingSubtitle: {
     fontSize: 16,
@@ -470,11 +686,12 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   highlight: {
-    color: '#2F9D45',
+    color: Brand.accent,
     fontWeight: 'bold',
   },
   form: {
     width: '100%',
+    paddingBottom: Spacing.md,
   },
   input: {
     height: 50,
