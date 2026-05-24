@@ -1,6 +1,6 @@
-import MaterialIcons from '@expo/vector-icons/MaterialIcons';
+﻿import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Modal,
   Pressable,
@@ -20,291 +20,13 @@ import { PrimaryButton } from '@/components/ui/primary-button';
 import { ScreenHeader } from '@/components/ui/screen-header';
 import { TerminalMapSlot, type TerminalMapCoords } from '@/components/ui/terminal-map-slot';
 import { Brand, Palette, Radius, Shadow, Spacing, Typography } from '@/constants/theme';
+import { ApiError } from '@/lib/api/client';
+import { pesquisarViagens } from '@/lib/api/viagens';
+import { mapApiViagensToViagens } from '@/lib/mappers/viagem';
+import type { Amenidades, Viagem } from '@/lib/types/viagem';
+import { ddmmToIso } from '@/lib/utils/date';
+import { formatPrecoKz } from '@/lib/utils/format';
 
-type Amenidades = {
-  tomada: boolean;
-  wifi: boolean;
-  arCondicionado: boolean;
-  entretenimento: boolean;
-};
-
-type Viagem = {
-  id: number;
-  agencia: string;
-  origem: string;
-  destino: string;
-  horaPartida: string;
-  horaChegada: string;
-  preco: number;
-  duracao: string;
-  embarque: string;
-  embarqueEndereco: string;
-  desembarque: string;
-  desembarqueEndereco: string;
-  lugaresRestantes: number;
-  amenities: Amenidades;
-  logoCor: string;
-  logoIniciais: string;
-  embarqueCoords?: TerminalMapCoords;
-  desembarqueCoords?: TerminalMapCoords;
-};
-
-const VIAGENS_MOCK: Viagem[] = [
-  {
-    id: 1,
-    agencia: 'Macom',
-    origem: 'Luanda',
-    destino: 'Lubango',
-    horaPartida: '09:30',
-    horaChegada: '18:30',
-    preco: 11500,
-    duracao: '7h40min',
-    embarque: 'Terminal da Gamek',
-    embarqueEndereco: 'Terminal da Gamek, Rua Amílcar Cabral',
-    desembarque: 'Terminal do Chioco',
-    desembarqueEndereco: 'Terminal do Chioco, Rua Dr. Agostinho Neto',
-    embarqueCoords: { latitude: -8.8383, longitude: 13.2344 },
-    desembarqueCoords: { latitude: -14.9176, longitude: 13.4925 },
-    lugaresRestantes: 2,
-    amenities: { tomada: true, wifi: true, arCondicionado: true, entretenimento: true },
-    logoCor: '#1E5FA8',
-    logoIniciais: 'M',
-  },
-  {
-    id: 2,
-    agencia: 'Huambo Express',
-    origem: 'Luanda',
-    destino: 'Lubango',
-    horaPartida: '07:00',
-    horaChegada: '19:00',
-    preco: 9500,
-    duracao: '12h',
-    embarque: 'Terminal da Maculusso',
-    embarqueEndereco: 'Terminal da Maculusso, Av. 4 de Fevereiro',
-    desembarque: 'Terminal do Lubango',
-    desembarqueEndereco: 'Terminal do Lubango, Rua Comandante Bula',
-    lugaresRestantes: 8,
-    amenities: { tomada: true, wifi: false, arCondicionado: true, entretenimento: false },
-    logoCor: '#C6082A',
-    logoIniciais: 'HE',
-  },
-  {
-    id: 3,
-    agencia: 'Rosalina Express',
-    origem: 'Lubango',
-    destino: 'Luanda',
-    horaPartida: '18:00',
-    horaChegada: '07:00',
-    preco: 14000,
-    duracao: '13h',
-    embarque: 'Paragem Principal',
-    embarqueEndereco: 'Paragem Principal, Lubango Centro',
-    desembarque: 'Terminal do Gamek',
-    desembarqueEndereco: 'Terminal do Gamek, Luanda',
-    lugaresRestantes: 5,
-    amenities: { tomada: true, wifi: true, arCondicionado: false, entretenimento: true },
-    logoCor: '#7B3F9E',
-    logoIniciais: 'RE',
-  },
-  {
-    id: 4,
-    agencia: 'TCUL Express',
-    origem: 'Lubango',
-    destino: 'Luanda',
-    horaPartida: '06:30',
-    horaChegada: '18:30',
-    preco: 14000,
-    duracao: '12h',
-    embarque: 'Terminal Rodoviário do Lubango',
-    embarqueEndereco: 'Terminal Rodoviário do Lubango',
-    desembarque: 'Terminal da Maculusso',
-    desembarqueEndereco: 'Terminal da Maculusso, Luanda',
-    lugaresRestantes: 12,
-    amenities: { tomada: false, wifi: true, arCondicionado: true, entretenimento: false },
-    logoCor: '#2F9D45',
-    logoIniciais: 'TC',
-  },
-  {
-    id: 5,
-    agencia: 'OLga Chaves',
-    origem: 'Lubango',
-    destino: 'Luanda',
-    horaPartida: '20:00',
-    horaChegada: '09:00',
-    preco: 13500,
-    duracao: '13h',
-    embarque: 'Paragem Principal',
-    embarqueEndereco: 'Paragem Principal, Lubango',
-    desembarque: 'Terminal do Gamek',
-    desembarqueEndereco: 'Terminal do Gamek, Luanda',
-    lugaresRestantes: 3,
-    amenities: { tomada: true, wifi: false, arCondicionado: true, entretenimento: false },
-    logoCor: '#D97706',
-    logoIniciais: 'OC',
-  },
-  {
-    id: 6,
-    agencia: 'Real Expresso',
-    origem: 'Luanda',
-    destino: 'Lubango',
-    horaPartida: '14:00',
-    horaChegada: '23:30',
-    preco: 10200,
-    duracao: '9h30min',
-    embarque: 'Terminal da Maculusso',
-    embarqueEndereco: 'Terminal da Maculusso, Luanda',
-    desembarque: 'Terminal do Chioco',
-    desembarqueEndereco: 'Terminal do Chioco, Lubango',
-    lugaresRestantes: 6,
-    amenities: { tomada: true, wifi: true, arCondicionado: true, entretenimento: false },
-    logoCor: '#0D6E6E',
-    logoIniciais: 'RE',
-  },
-  {
-    id: 7,
-    agencia: 'Gestour',
-    origem: 'Luanda',
-    destino: 'Lubango',
-    horaPartida: '22:00',
-    horaChegada: '08:30',
-    preco: 10800,
-    duracao: '10h30min',
-    embarque: 'Terminal da Gamek',
-    embarqueEndereco: 'Terminal da Gamek, Luanda',
-    desembarque: 'Terminal Rodoviário do Lubango',
-    desembarqueEndereco: 'Terminal Rodoviário do Lubango',
-    lugaresRestantes: 2,
-    amenities: { tomada: true, wifi: true, arCondicionado: true, entretenimento: true },
-    logoCor: '#5B21B6',
-    logoIniciais: 'GT',
-  },
-  {
-    id: 8,
-    agencia: 'SGO Viação',
-    origem: 'Luanda',
-    destino: 'Lubango',
-    horaPartida: '11:00',
-    horaChegada: '21:00',
-    preco: 9900,
-    duracao: '10h',
-    embarque: 'Terminal da Gamek',
-    embarqueEndereco: 'Terminal da Gamek, Av. Deolinda Rodrigues',
-    desembarque: 'Terminal do Lubango',
-    desembarqueEndereco: 'Terminal do Lubango, Centro',
-    lugaresRestantes: 15,
-    amenities: { tomada: false, wifi: true, arCondicionado: true, entretenimento: false },
-    logoCor: '#B45309',
-    logoIniciais: 'SG',
-  },
-  {
-    id: 9,
-    agencia: 'AngoReal',
-    origem: 'Lubango',
-    destino: 'Luanda',
-    horaPartida: '05:30',
-    horaChegada: '17:00',
-    preco: 13200,
-    duracao: '11h30min',
-    embarque: 'Terminal Rodoviário do Lubango',
-    embarqueEndereco: 'Terminal Rodoviário do Lubango',
-    desembarque: 'Terminal da Maculusso',
-    desembarqueEndereco: 'Terminal da Maculusso, Luanda',
-    lugaresRestantes: 9,
-    amenities: { tomada: true, wifi: false, arCondicionado: true, entretenimento: false },
-    logoCor: '#BE123C',
-    logoIniciais: 'AR',
-  },
-  {
-    id: 10,
-    agencia: 'TransAngola',
-    origem: 'Lubango',
-    destino: 'Luanda',
-    horaPartida: '12:00',
-    horaChegada: '23:45',
-    preco: 12800,
-    duracao: '11h45min',
-    embarque: 'Terminal do Chioco',
-    embarqueEndereco: 'Terminal do Chioco, Lubango',
-    desembarque: 'Terminal da Gamek',
-    desembarqueEndereco: 'Terminal da Gamek, Luanda',
-    lugaresRestantes: 4,
-    amenities: { tomada: true, wifi: true, arCondicionado: false, entretenimento: true },
-    logoCor: '#1D4ED8',
-    logoIniciais: 'TA',
-  },
-  {
-    id: 11,
-    agencia: 'Kutato Express',
-    origem: 'Lubango',
-    destino: 'Luanda',
-    horaPartida: '15:30',
-    horaChegada: '04:00',
-    preco: 13700,
-    duracao: '12h30min',
-    embarque: 'Paragem Principal',
-    embarqueEndereco: 'Paragem Principal, Lubango',
-    desembarque: 'Terminal da Maculusso',
-    desembarqueEndereco: 'Terminal da Maculusso, Luanda',
-    lugaresRestantes: 7,
-    amenities: { tomada: true, wifi: true, arCondicionado: true, entretenimento: false },
-    logoCor: '#047857',
-    logoIniciais: 'KE',
-  },
-  {
-    id: 12,
-    agencia: 'Efata Lines',
-    origem: 'Luanda',
-    destino: 'Lubango',
-    horaPartida: '16:30',
-    horaChegada: '02:00',
-    preco: 11200,
-    duracao: '9h30min',
-    embarque: 'Terminal da Maculusso',
-    embarqueEndereco: 'Terminal da Maculusso, Luanda',
-    desembarque: 'Terminal do Chioco',
-    desembarqueEndereco: 'Terminal do Chioco, Lubango',
-    lugaresRestantes: 2,
-    amenities: { tomada: true, wifi: true, arCondicionado: true, entretenimento: true },
-    logoCor: '#6D28D9',
-    logoIniciais: 'EF',
-  },
-  {
-    id: 13,
-    agencia: 'Coopérnica',
-    origem: 'Lubango',
-    destino: 'Luanda',
-    horaPartida: '08:00',
-    horaChegada: '19:30',
-    preco: 12500,
-    duracao: '11h30min',
-    embarque: 'Terminal do Chioco',
-    embarqueEndereco: 'Terminal do Chioco, Lubango',
-    desembarque: 'Terminal da Gamek',
-    desembarqueEndereco: 'Terminal da Gamek, Luanda',
-    lugaresRestantes: 11,
-    amenities: { tomada: false, wifi: false, arCondicionado: true, entretenimento: false },
-    logoCor: '#4B5563',
-    logoIniciais: 'CP',
-  },
-  {
-    id: 14,
-    agencia: 'Benguela Express',
-    origem: 'Luanda',
-    destino: 'Lubango',
-    horaPartida: '06:00',
-    horaChegada: '18:00',
-    preco: 10500,
-    duracao: '12h',
-    embarque: 'Terminal da Gamek',
-    embarqueEndereco: 'Terminal da Gamek, Luanda',
-    desembarque: 'Terminal Rodoviário do Lubango',
-    desembarqueEndereco: 'Terminal Rodoviário do Lubango',
-    lugaresRestantes: 18,
-    amenities: { tomada: true, wifi: false, arCondicionado: true, entretenimento: false },
-    logoCor: '#0369A1',
-    logoIniciais: 'BE',
-  },
-];
 
 const DIAS_SEMANA_CHIP = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 const MESES_CURTO = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
@@ -407,7 +129,7 @@ function filtrarViagens(viagens: Viagem[], origem?: string, destino?: string): V
     return matchOrigem && matchDestino;
   });
 
-  return filtradas.length > 0 ? filtradas : viagens;
+  return filtradas;
 }
 
 function ordenarViagens(viagens: Viagem[], criterio: SortOption): Viagem[] {
@@ -448,21 +170,56 @@ export default function Resultados() {
   const [sortModalAberto, setSortModalAberto] = useState(false);
   const [filtrosModalAberto, setFiltrosModalAberto] = useState(false);
   const [filtroAmenidades, setFiltroAmenidades] = useState(false);
+  const [viagens, setViagens] = useState<Viagem[]>([]);
+  const [loadingViagens, setLoadingViagens] = useState(true);
+  const [apiError, setApiError] = useState('');
 
   const dataChipSelecionada = datasDisponiveis[dataSelecionada];
   const dataViagemParam = dataChipSelecionada
     ? formatarDataDDMM(dataChipSelecionada)
     : dataIdaParam;
 
+  const carregarViagens = useCallback(async () => {
+    setLoadingViagens(true);
+    setApiError('');
+    try {
+      const iso = ddmmToIso(dataViagemParam);
+      if (!iso) {
+        setApiError('Data de viagem inválida.');
+        setViagens([]);
+        return;
+      }
+      const raw = await pesquisarViagens({
+        origem: params.origem?.trim() ?? '',
+        destino: params.destino?.trim() ?? '',
+        data: iso,
+      });
+      setViagens(mapApiViagensToViagens(raw));
+    } catch (err) {
+      setApiError(
+        err instanceof ApiError
+          ? err.message
+          : 'Não foi possível carregar viagens.'
+      );
+      setViagens([]);
+    } finally {
+      setLoadingViagens(false);
+    }
+  }, [params.origem, params.destino, dataViagemParam]);
+
+  useEffect(() => {
+    void carregarViagens();
+  }, [carregarViagens]);
+
   const viagensFiltradas = useMemo(() => {
-    let lista = filtrarViagens(VIAGENS_MOCK, params.origem, params.destino);
+    let lista = filtrarViagens(viagens, params.origem, params.destino);
     if (filtroAmenidades) {
       lista = lista.filter(
         (v) => v.amenities.wifi && v.amenities.arCondicionado
       );
     }
     return ordenarViagens(lista, ordenacao);
-  }, [params.origem, params.destino, ordenacao, filtroAmenidades]);
+  }, [viagens, params.origem, params.destino, ordenacao, filtroAmenidades]);
 
   const labelOrdenacao =
     OPCOES_ORDENACAO.find((o) => o.id === ordenacao)?.label ?? 'Mais cedo';
@@ -475,13 +232,14 @@ export default function Resultados() {
     router.push({
       pathname: '/reserva',
       params: {
+        viagemId: String(viagem.id),
         agencia: viagem.agencia,
         origem: viagem.origem,
         destino: viagem.destino,
         data: dataViagemParam,
         hora: viagem.horaPartida,
         horaChegada: viagem.horaChegada,
-        preco: `${formatarPreco(viagem.preco)} Kz`,
+        preco: formatPrecoKz(viagem.preco),
         duracao: viagem.duracao,
         embarque: viagem.embarque,
         desembarque: viagem.desembarque,
@@ -596,7 +354,17 @@ export default function Resultados() {
         ]}
         showsVerticalScrollIndicator={false}
       >
-        {viagensFiltradas.length === 0 ? (
+        {loadingViagens ? (
+          <Text style={styles.loadingText}>A pesquisar viagens...</Text>
+        ) : apiError ? (
+          <EmptyState
+            icon="⚠️"
+            title="Erro na pesquisa"
+            message={apiError}
+            actionLabel="Tentar novamente"
+            onAction={() => void carregarViagens()}
+          />
+        ) : viagensFiltradas.length === 0 ? (
           <EmptyState
             icon="🔍"
             title="Nenhuma viagem encontrada"
@@ -1066,6 +834,12 @@ const styles = StyleSheet.create({
   listContent: {
     padding: Spacing.lg,
     paddingBottom: Spacing.xxl,
+  },
+  loadingText: {
+    textAlign: 'center',
+    color: Palette.textSecondary,
+    fontSize: 15,
+    paddingVertical: Spacing.xxl,
   },
   card: {
     backgroundColor: Palette.surface,

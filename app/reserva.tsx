@@ -1,6 +1,5 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
@@ -22,26 +21,19 @@ import { ScreenHeader } from '@/components/ui/screen-header';
 import { SectionTitle } from '@/components/ui/section-title';
 import { StepIndicator } from '@/components/ui/step-indicator';
 import { Brand, Palette, Radius, Shadow, Spacing, Typography } from '@/constants/theme';
+import { ApiError } from '@/lib/api/client';
+import { confirmarPagamento, criarReserva } from '@/lib/api/reservas';
+import { obterAssentos } from '@/lib/api/viagens';
+import { assentoNumero, assentoOcupado } from '@/lib/mappers/viagem';
+import type { ApiAssento } from '@/lib/types/api';
+import { formatPreco, parsePreco } from '@/lib/utils/format';
 
-const TOTAL_ASSENTOS = 30;
 const ASSENTOS_POR_FILA = 4;
-const ASSENTOS_OCUPADOS = new Set([3, 7, 12, 15, 22]);
+const TOTAL_ASSENTOS_FALLBACK = 30;
 
 function param(value?: string | string[]) {
   if (Array.isArray(value)) return value[0] ?? '';
   return value ?? '';
-}
-
-function parsePreco(value: string): number {
-  const cleaned = value.replace(/\s/g, '').replace(/\./g, '').replace(',', '.');
-  const n = parseFloat(cleaned);
-  return Number.isFinite(n) ? n : 0;
-}
-
-function formatPreco(value: number): string {
-  const [intPart, decPart = '00'] = value.toFixed(2).split('.');
-  const withDots = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
-  return `${withDots},${decPart}`;
 }
 
 function newPassengerId() {
@@ -59,28 +51,9 @@ interface Passageiro {
 
 const MAX_PASSAGEIROS = 10;
 
-interface ReservaSalva {
-  id: string;
-  userEmail: string | null;
-  viagem: {
-    agencia?: string | string[];
-    origem?: string | string[];
-    destino?: string | string[];
-    data?: string | string[];
-    hora?: string | string[];
-    preco?: string | string[];
-    duracao?: string | string[];
-    embarque?: string | string[];
-    desembarque?: string | string[];
-  };
-  assentos: number[];
-  passageiros: Passageiro[];
-  status: 'ativa' | 'cancelada' | 'remarcada';
-  criadaEm: string;
-}
-
 export default function Reserva() {
   const params = useLocalSearchParams();
+  const viagemId = Number(param(params.viagemId));
   const agencia = param(params.agencia);
   const origem = param(params.origem);
   const destino = param(params.destino);
@@ -93,6 +66,9 @@ export default function Reserva() {
   const desembarque = param(params.desembarque);
 
   const [passageiros, setPassageiros] = useState<Passageiro[]>([]);
+  const [assentosApi, setAssentosApi] = useState<ApiAssento[]>([]);
+  const [assentosLoading, setAssentosLoading] = useState(true);
+  /** IDs dos assentos na API */
   const [assentosSelecionados, setAssentosSelecionados] = useState<number[]>([]);
   const [pagamento, setPagamento] = useState<'referencia' | 'transferencia'>('referencia');
   const [processando, setProcessando] = useState(false);
@@ -108,7 +84,59 @@ export default function Reserva() {
   const [seatHint, setSeatHint] = useState('');
   const [saveError, setSaveError] = useState('');
 
+  const assentosPorNumero = useMemo(() => {
+    const map = new Map<number, ApiAssento>();
+    for (const a of assentosApi) {
+      const n = assentoNumero(a);
+      if (n > 0) map.set(n, a);
+    }
+    return map;
+  }, [assentosApi]);
+
+  const totalAssentosLayout = useMemo(() => {
+    if (assentosApi.length === 0) return TOTAL_ASSENTOS_FALLBACK;
+    const max = Math.max(...assentosApi.map(assentoNumero));
+    return Math.max(max, TOTAL_ASSENTOS_FALLBACK);
+  }, [assentosApi]);
+
+  const filasAssentos = Math.ceil(totalAssentosLayout / ASSENTOS_POR_FILA);
+
   const precoUnitario = parsePreco(preco);
+
+  const numerosSelecionados = useMemo(
+    () =>
+      assentosSelecionados
+        .map((id) => assentosApi.find((a) => a.id === id))
+        .filter(Boolean)
+        .map((a) => assentoNumero(a!))
+        .sort((a, b) => a - b),
+    [assentosSelecionados, assentosApi]
+  );
+
+  const carregarAssentos = useCallback(async () => {
+    if (!viagemId) {
+      setAssentosLoading(false);
+      setSeatHint('Identificador da viagem em falta.');
+      return;
+    }
+    setAssentosLoading(true);
+    try {
+      const lista = await obterAssentos(viagemId);
+      setAssentosApi(lista);
+    } catch (err) {
+      setSeatHint(
+        err instanceof ApiError
+          ? err.message
+          : 'Não foi possível carregar os assentos.'
+      );
+    } finally {
+      setAssentosLoading(false);
+    }
+  }, [viagemId]);
+
+  useEffect(() => {
+    void carregarAssentos();
+  }, [carregarAssentos]);
   const passageirosIncluidos = useMemo(
     () => passageiros.filter((p) => p.incluido && p.nome.trim() && p.bilhete.trim()),
     [passageiros]
@@ -136,56 +164,22 @@ export default function Reserva() {
     [passageiroPreenchido, assentosCompletos, pago]
   );
 
-  async function salvarReservaLocal(assentos: number[], passageirosLista: Passageiro[]) {
-    setSaving(true);
-    setSaveError('');
-    try {
-      const currentUserEmail = await AsyncStorage.getItem('currentUserEmail');
-      const json = await AsyncStorage.getItem('reservas');
-      const existentes: ReservaSalva[] = json ? JSON.parse(json) : [];
-
-      const totalGuardar = formatPreco(
-        parsePreco(param(params.preco)) * passageirosLista.length
-      );
-
-      const novaReserva: ReservaSalva = {
-        id: Date.now().toString(),
-        userEmail: currentUserEmail,
-        viagem: {
-          agencia: params.agencia,
-          origem: params.origem,
-          destino: params.destino,
-          data: params.data,
-          hora: params.hora,
-          preco: totalGuardar,
-          duracao: params.duracao,
-          embarque: params.embarque,
-          desembarque: params.desembarque,
-        },
-        assentos,
-        passageiros: passageirosLista,
-        status: 'ativa',
-        criadaEm: new Date().toISOString(),
-      };
-
-      await AsyncStorage.setItem('reservas', JSON.stringify([novaReserva, ...existentes]));
-    } catch {
-      setSaveError('Pagamento confirmado, mas não foi possível guardar localmente.');
-    } finally {
-      setSaving(false);
-    }
-  }
-
   function toggleAssento(numero: number) {
     setSeatHint('');
 
-    if (ASSENTOS_OCUPADOS.has(numero)) {
+    const assento = assentosPorNumero.get(numero);
+    if (!assento) {
+      setSeatHint('Assento não disponível nesta viagem.');
+      return;
+    }
+
+    if (assentoOcupado(assento)) {
       setSeatHint('Este assento já está ocupado.');
       return;
     }
 
-    if (assentosSelecionados.includes(numero)) {
-      setAssentosSelecionados(assentosSelecionados.filter((a) => a !== numero));
+    if (assentosSelecionados.includes(assento.id)) {
+      setAssentosSelecionados(assentosSelecionados.filter((id) => id !== assento.id));
       return;
     }
 
@@ -199,10 +193,14 @@ export default function Reserva() {
       return;
     }
 
-    setAssentosSelecionados([...assentosSelecionados, numero]);
+    setAssentosSelecionados([...assentosSelecionados, assento.id]);
   }
 
-  function efetuarPagamento() {
+  async function efetuarPagamento() {
+    if (!viagemId) {
+      setSaveError('Viagem inválida. Volte aos resultados e tente novamente.');
+      return;
+    }
     if (!passageiroPreenchido) {
       setSeatHint('Adicione os dados do passageiro primeiro.');
       return;
@@ -213,16 +211,34 @@ export default function Reserva() {
     }
 
     setSeatHint('');
+    setSaveError('');
     setProcessando(true);
+    setSaving(true);
 
-    setTimeout(async () => {
-      await salvarReservaLocal(
-        assentosSelecionados,
-        passageirosIncluidos.map(({ id, incluido, ...rest }) => rest)
-      );
-      setProcessando(false);
+    try {
+      const referencia = `REF-${Date.now()}`;
+      const metodo =
+        pagamento === 'referencia' ? 'multicaixa' : ('transferencia' as const);
+
+      const reserva = await criarReserva({
+        viagem_id: viagemId,
+        assento_ids: assentosSelecionados,
+        metodo_pagamento: metodo,
+        referencia_pagamento: referencia,
+      });
+
+      await confirmarPagamento(reserva.id, referencia);
       setPago(true);
-    }, 2500);
+    } catch (err) {
+      setSaveError(
+        err instanceof ApiError
+          ? err.message
+          : 'Não foi possível concluir o pagamento. Tente novamente.'
+      );
+    } finally {
+      setProcessando(false);
+      setSaving(false);
+    }
   }
 
   function resetModalFields() {
@@ -325,9 +341,10 @@ export default function Reserva() {
   }
 
   function renderAssento(numero: number) {
-    const ocupado = ASSENTOS_OCUPADOS.has(numero);
-    const selecionado = assentosSelecionados.includes(numero);
-    const bloqueado = numPassageiros === 0;
+    const assento = assentosPorNumero.get(numero);
+    const ocupado = assento ? assentoOcupado(assento) : true;
+    const selecionado = assento ? assentosSelecionados.includes(assento.id) : false;
+    const bloqueado = numPassageiros === 0 || assentosLoading || !assento;
 
     return (
       <Pressable
@@ -402,7 +419,7 @@ export default function Reserva() {
                   : 'Por passageiro'}
               </Text>
               <Text style={styles.summaryPrice}>
-                {numPassageiros > 0 ? `${totalFormatado} Kz` : `${preco || '0'} Kz`}
+                {numPassageiros > 0 ? `${totalFormatado} Kz` : `${preco || '0'}`}
               </Text>
             </View>
           </View>
@@ -493,8 +510,8 @@ export default function Reserva() {
             accessibilityRole="button"
             accessibilityLabel="Adicionar mais passageiros"
           >
-            <Text style={styles.addMoreIcon}>👤+</Text>
-            <Text style={styles.addMoreText}>Informe mais passageiros</Text>
+            
+            <Text style={styles.addMoreText}>👤+ Informe mais passageiros</Text>
             <Text style={styles.addMoreArrow}>›</Text>
           </Pressable>
           </View>
@@ -546,8 +563,12 @@ export default function Reserva() {
             <Text style={styles.busFrontText}>Frente do autocarro</Text>
           </View>
 
+          {assentosLoading ? (
+            <Text style={styles.seatSummary}>A carregar mapa de assentos...</Text>
+          ) : null}
+
           <View style={styles.busLayout}>
-            {Array.from({ length: TOTAL_ASSENTOS / ASSENTOS_POR_FILA }).map((_, fila) => {
+            {Array.from({ length: filasAssentos }).map((_, fila) => {
               const base = fila * ASSENTOS_POR_FILA + 1;
               return (
                 <View key={fila} style={styles.busRow}>
@@ -568,17 +589,17 @@ export default function Reserva() {
           <Text style={styles.seatSummary}>
             {numPassageiros === 0
               ? 'Selecione passageiros acima para escolher assentos'
-              : assentosSelecionados.length > 0
-                ? `Assentos (${assentosSelecionados.length}/${numPassageiros}): ${assentosSelecionados.join(', ')}`
+              : numerosSelecionados.length > 0
+                ? `Assentos (${numerosSelecionados.length}/${numPassageiros}): ${numerosSelecionados.join(', ')}`
                 : `Selecione ${numPassageiros} assento(s) — um por passageiro`}
           </Text>
 
-          {passageirosIncluidos.length > 0 && assentosSelecionados.length > 0 ? (
+          {passageirosIncluidos.length > 0 && numerosSelecionados.length > 0 ? (
             <View style={styles.seatAssignList}>
               {passageirosIncluidos.map((p, index) => (
                 <Text key={p.id} style={styles.seatAssignItem}>
                   {p.nome.split(' ')[0]}: assento{' '}
-                  {assentosSelecionados[index] ?? '—'}
+                  {numerosSelecionados[index] ?? '—'}
                 </Text>
               ))}
             </View>

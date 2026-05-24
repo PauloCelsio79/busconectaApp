@@ -1,4 +1,3 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
@@ -14,15 +13,11 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { FocusedStatusBar } from '@/components/ui/focused-status-bar';
+import { useAuth } from '@/contexts/AuthContext';
 import { Brand, Palette, Radius, Spacing } from '@/constants/theme';
 
-interface StoredUser {
-  name: string;
-  email: string;
-  password: string;
-}
-
 export default function Dashboard() {
+  const { user, isLoading: authLoading, logout, isAuthenticated } = useAuth();
   const today = new Date();
   const currentYear = today.getFullYear();
   const todayStart = new Date(currentYear, today.getMonth(), today.getDate());
@@ -36,34 +31,14 @@ export default function Dashboard() {
   const [datePickerOpen, setDatePickerOpen] = useState<null | 'ida' | 'regresso'>(null);
   const [calendarMonth, setCalendarMonth] = useState(today.getMonth());
   const [calendarYear, setCalendarYear] = useState(currentYear);
-  const [userName, setUserName] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [formError, setFormError] = useState('');
 
   useEffect(() => {
-    async function loadUserName() {
-      try {
-        const currentUserEmail = await AsyncStorage.getItem('currentUserEmail');
-        if (!currentUserEmail) {
-          router.replace('/');
-          return;
-        }
-
-        const json = await AsyncStorage.getItem('users');
-        if (!json) return;
-
-        const users: StoredUser[] = JSON.parse(json);
-        const user = users.find((u) => u.email === currentUserEmail);
-        if (user) {
-          setUserName(user.name);
-        }
-      } catch {
-        // ignora erro silenciosamente
-      }
+    if (!authLoading && !isAuthenticated) {
+      router.replace('/');
     }
-
-    void loadUserName();
-  }, []);
+  }, [authLoading, isAuthenticated]);
 
   const monthNames = [
     'Janeiro',
@@ -318,13 +293,24 @@ export default function Dashboard() {
               <Text style={styles.menuIcon}>🎧</Text>
               <Text style={styles.menuItemText}>Suporte</Text>
             </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.menuItem, styles.menuItemLogout]}
+              onPress={() => {
+                setMenuOpen(false);
+                void logout();
+              }}
+            >
+              <Text style={styles.menuIcon}>⎋</Text>
+              <Text style={styles.menuItemTextLogout}>Terminar sessão</Text>
+            </TouchableOpacity>
           </Pressable>
         </Pressable>
       )}
 
       <View style={styles.card}>
-        {userName ? (
-          <Text style={styles.greeting}>Olá, {userName.split(' ')[0]} 👋</Text>
+        {user?.nome ? (
+          <Text style={styles.greeting}>Olá, {user.nome.split(' ')[0]} 👋</Text>
         ) : null}
         <View style={styles.brandingRow}>
           <Text style={styles.brandingTitle}>Bus</Text>
@@ -652,6 +638,17 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     color: '#191919',
+  },
+  menuItemLogout: {
+    marginTop: Spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: Palette.border,
+    paddingTop: Spacing.md,
+  },
+  menuItemTextLogout: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: Brand.primary,
   },
   card: {
     position: 'absolute',

@@ -5,6 +5,7 @@ import { Platform } from 'react-native';
 import * as SystemUI from 'expo-system-ui';
 import 'react-native-reanimated';
 
+import { AuthProvider } from '@/contexts/AuthContext';
 import { Palette } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 
@@ -22,6 +23,7 @@ export default function RootLayout() {
   }, []);
 
   return (
+    <AuthProvider>
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <Stack screenOptions={{ headerShown: false, animation: 'slide_from_right' }}>
         <Stack.Screen name="(tabs)" />
@@ -33,5 +35,6 @@ export default function RootLayout() {
         <Stack.Screen name="meus-tickets" />
       </Stack>
     </ThemeProvider>
+    </AuthProvider>
   );
 }

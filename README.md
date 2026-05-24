@@ -1,6 +1,14 @@
-# Welcome to your Expo app 👋
+# BusConecta
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Aplicação móvel (React Native + Expo) para pesquisa e reserva de viagens de autocarro em Angola.
+
+📄 **Documentação técnica completa:** [DOCUMENTACAO_TECNICA.md](./DOCUMENTACAO_TECNICA.md)
+
+---
+
+## Início rápido
+
+Projeto [Expo](https://expo.dev) com [Expo Router](https://docs.expo.dev/router/introduction/).
 
 ## Get started
 
@@ -9,9 +17,7 @@ This is an [Expo](https://expo.dev) project created with [`create-expo-app`](htt
    ```bash
    npm install
    ```
-~
 
-!!!!!!!!!!!
 2. Start the app
 
    ```bash

@@ -1,6 +1,5 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -15,30 +14,23 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppTextInput } from '@/components/ui/app-text-input';
 import { FocusedStatusBar } from '@/components/ui/focused-status-bar';
 import { PrimaryButton } from '@/components/ui/primary-button';
+import { useAuth } from '@/contexts/AuthContext';
+import { ApiError } from '@/lib/api/client';
 import { Brand, Palette, Radius, Spacing, Typography } from '@/constants/theme';
-
-interface StoredUser {
-  name: string;
-  email: string;
-  password: string;
-}
-
-async function loadUsers(): Promise<StoredUser[]> {
-  const json = await AsyncStorage.getItem('users');
-  if (!json) return [];
-  try {
-    return JSON.parse(json) as StoredUser[];
-  } catch {
-    return [];
-  }
-}
 
 export default function LoginScreen() {
   const router = useRouter();
+  const { login, isAuthenticated, isLoading: authLoading } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [formError, setFormError] = useState('');
+
+  useEffect(() => {
+    if (!authLoading && isAuthenticated) {
+      router.replace('/dashboard');
+    }
+  }, [authLoading, isAuthenticated, router]);
 
   async function handleLogin() {
     setFormError('');
@@ -50,25 +42,28 @@ export default function LoginScreen() {
 
     setLoading(true);
     try {
-      const users = await loadUsers();
-      const user = users.find(
-        (u) =>
-          u.email.trim().toLowerCase() === email.trim().toLowerCase() &&
-          u.password === password
-      );
-
-      if (!user) {
-        setFormError('E-mail ou palavra-passe incorretos.');
-        return;
-      }
-
-      await AsyncStorage.setItem('currentUserEmail', user.email);
+      await login(email, password);
       router.replace('/dashboard');
-    } catch {
-      setFormError('Não foi possível iniciar sessão. Tente novamente.');
+    } catch (err) {
+      setFormError(
+        err instanceof ApiError
+          ? err.message
+          : 'Não foi possível iniciar sessão. Tente novamente.'
+      );
     } finally {
       setLoading(false);
     }
+  }
+
+  if (authLoading) {
+    return (
+      <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+        <FocusedStatusBar iconStyle="light" backgroundColor={Brand.primaryDark} />
+        <View style={styles.loadingWrap}>
+          <Text style={styles.loadingText}>A carregar...</Text>
+        </View>
+      </SafeAreaView>
+    );
   }
 
   return (
@@ -103,7 +98,7 @@ export default function LoginScreen() {
 
             <AppTextInput
               label="E-mail"
-              placeholder="exemplo@email.com"
+              placeholder="passageiro@busconecta.ao"
               keyboardType="email-address"
               autoCapitalize="none"
               autoComplete="email"
@@ -138,7 +133,7 @@ export default function LoginScreen() {
           </View>
 
           <Text style={styles.footerNote}>
-            Recuperação de palavra-passe disponível em breve
+            Conta demo: passageiro@busconecta.ao / password
           </Text>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -153,6 +148,15 @@ const styles = StyleSheet.create({
   },
   flex: {
     flex: 1,
+  },
+  loadingWrap: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    color: Brand.white,
+    fontSize: 15,
   },
   scroll: {
     flexGrow: 1,

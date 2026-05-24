@@ -1,4 +1,3 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
@@ -15,62 +14,35 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { EmptyState } from '@/components/ui/empty-state';
 import { FocusedStatusBar } from '@/components/ui/focused-status-bar';
 import { ScreenHeader } from '@/components/ui/screen-header';
+import { useAuth } from '@/contexts/AuthContext';
+import { listarReservas } from '@/lib/api/reservas';
+import {
+  isBilheteAtivo,
+  mapApiReservasToApp,
+  type ReservaApp,
+} from '@/lib/mappers/reserva';
 import { Brand, Palette, Radius, Shadow, Spacing } from '@/constants/theme';
 
-interface Passageiro {
-  nome: string;
-  bilhete: string;
-}
-
-interface ReservaSalva {
-  id: string;
-  userEmail: string | null;
-  viagem: {
-    agencia?: string | string[];
-    origem?: string | string[];
-    destino?: string | string[];
-    data?: string | string[];
-    hora?: string | string[];
-    preco?: string | string[];
-  };
-  assentos: number[];
-  passageiros: Passageiro[];
-  status: 'ativa' | 'cancelada' | 'remarcada';
-  criadaEm: string;
-}
-
-function param(value?: string | string[]) {
-  if (Array.isArray(value)) return value[0] ?? '';
-  return value ?? '';
-}
-
 export default function MeusTicketsScreen() {
-  const [reservas, setReservas] = useState<ReservaSalva[]>([]);
+  const { isAuthenticated } = useAuth();
+  const [reservas, setReservas] = useState<ReservaApp[]>([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [ticketAberto, setTicketAberto] = useState<string | null>(null);
 
   const carregar = useCallback(async () => {
+    if (!isAuthenticated) return;
     setLoading(true);
     try {
-      const currentUserEmail = await AsyncStorage.getItem('currentUserEmail');
-      const json = await AsyncStorage.getItem('reservas');
-      const todas: ReservaSalva[] = json ? JSON.parse(json) : [];
-
-      setReservas(
-        todas.filter(
-          (r) =>
-            r.userEmail === currentUserEmail &&
-            r.status !== 'cancelada'
-        )
-      );
+      const raw = await listarReservas();
+      setReservas(mapApiReservasToApp(raw).filter(isBilheteAtivo));
     } catch {
-      // silencioso — empty state cobre
+      setReservas([]);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [isAuthenticated]);
 
   useFocusEffect(
     useCallback(() => {
@@ -117,59 +89,42 @@ export default function MeusTicketsScreen() {
 
         {reservas.map((r) => {
           const isOpen = ticketAberto === r.id;
-          const qrCode = `TICKET-${r.id}`;
+          const qrCode = r.codigo ? `TICKET-${r.codigo}` : `TICKET-${r.id}`;
 
           return (
             <TouchableOpacity
               key={r.id}
-              activeOpacity={0.92}
               style={styles.card}
-              onPress={() =>
-                setTicketAberto((prev) => (prev === r.id ? null : r.id))
-              }
-              accessibilityRole="button"
-              accessibilityLabel={`Bilhete ${param(r.viagem.origem)} para ${param(r.viagem.destino)}`}
-              accessibilityState={{ expanded: isOpen }}
+              activeOpacity={0.9}
+              onPress={() => setTicketAberto(isOpen ? null : r.id)}
             >
-              <View style={styles.row}>
-                <View style={styles.cardMain}>
-                  <Text style={styles.agencia}>{param(r.viagem.agencia)}</Text>
-                  <Text style={styles.route}>
-                    {param(r.viagem.origem)} → {param(r.viagem.destino)}
-                  </Text>
-                  <Text style={styles.detail}>
-                    {param(r.viagem.data) ? `${param(r.viagem.data)} • ` : ''}
-                    {param(r.viagem.hora)}
-                  </Text>
-                  <Text style={styles.tapHint}>
-                    {isOpen ? 'Toque para ocultar QR' : 'Toque para mostrar QR'}
-                  </Text>
-                </View>
-                <View style={styles.right}>
-                  <Text style={styles.price}>{param(r.viagem.preco)} Kz</Text>
-                  <View style={styles.statusBadge}>
-                    <Text style={styles.statusText}>{r.status.toUpperCase()}</Text>
-                  </View>
-                </View>
+              <View style={styles.cardHeader}>
+                <Text style={styles.route}>
+                  {r.origem} → {r.destino}
+                </Text>
+                <Text style={styles.date}>
+                  {r.data} · {r.hora}
+                </Text>
               </View>
 
               {isOpen ? (
-                <View style={styles.qrContainer}>
-                  <View style={styles.qrBox}>
-                    <Text style={styles.qrLabel}>QR DO BILHETE</Text>
-                    <Image
-                      source={require('../assets/images/qr-code.jpg')}
-                      style={styles.qrImage}
-                      resizeMode="contain"
-                      accessibilityLabel="Código QR do bilhete"
-                    />
-                    <Text style={styles.qrCode}>{qrCode}</Text>
-                  </View>
-                  <Text style={styles.qrHint}>
-                    Apresente este código no terminal de embarque.
+                <View style={styles.ticketBody}>
+                  <Image
+                    source={{
+                      uri: `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(qrCode)}`,
+                    }}
+                    style={styles.qr}
+                    accessibilityLabel="Código QR do bilhete"
+                  />
+                  <Text style={styles.qrHint}>{qrCode}</Text>
+                  <Text style={styles.meta}>
+                    {r.agencia} · Assentos {r.assentos.join(', ') || '—'}
                   </Text>
+                  <Text style={styles.price}>{r.preco}</Text>
                 </View>
-              ) : null}
+              ) : (
+                <Text style={styles.tapHint}>Toque para ver o QR</Text>
+              )}
             </TouchableOpacity>
           );
         })}
@@ -196,95 +151,57 @@ const styles = StyleSheet.create({
   },
   card: {
     backgroundColor: Palette.surface,
-    borderRadius: Radius.xl,
+    borderRadius: Radius.lg,
     padding: Spacing.lg,
-    marginBottom: Spacing.lg,
+    marginBottom: Spacing.md,
     borderWidth: 1,
     borderColor: Palette.border,
     ...Shadow.card,
   },
-  row: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  cardMain: {
-    flex: 1,
-    paddingRight: Spacing.md,
-  },
-  agencia: {
-    fontSize: 17,
-    fontWeight: '800',
-    color: Brand.primaryDark,
+  cardHeader: {
+    marginBottom: Spacing.sm,
   },
   route: {
-    marginTop: Spacing.xs,
-    fontWeight: '600',
+    fontSize: 17,
+    fontWeight: '800',
     color: Palette.text,
   },
-  detail: {
-    marginTop: 2,
-    fontSize: 12,
+  date: {
+    fontSize: 13,
     color: Palette.textSecondary,
+    marginTop: 4,
   },
   tapHint: {
-    marginTop: Spacing.sm,
-    fontSize: 12,
+    fontSize: 13,
     color: Brand.primary,
     fontWeight: '600',
   },
-  right: {
-    alignItems: 'flex-end',
+  ticketBody: {
+    alignItems: 'center',
+    paddingTop: Spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: Palette.border,
+    marginTop: Spacing.sm,
+  },
+  qr: {
+    width: 180,
+    height: 180,
+    marginBottom: Spacing.md,
+  },
+  qrHint: {
+    fontSize: 12,
+    color: Palette.textMuted,
+    marginBottom: Spacing.sm,
+  },
+  meta: {
+    fontSize: 13,
+    color: Palette.textSecondary,
+    textAlign: 'center',
   },
   price: {
+    marginTop: Spacing.sm,
     fontSize: 16,
     fontWeight: '800',
     color: Brand.primary,
-  },
-  statusBadge: {
-    marginTop: Spacing.sm,
-    backgroundColor: Brand.accentLight,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: Radius.pill,
-  },
-  statusText: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: Brand.accent,
-  },
-  qrContainer: {
-    marginTop: Spacing.lg,
-    paddingTop: Spacing.lg,
-    borderTopWidth: 1,
-    borderTopColor: Palette.border,
-  },
-  qrBox: {
-    alignItems: 'center',
-    padding: Spacing.lg,
-    borderRadius: Radius.lg,
-    backgroundColor: Palette.surfaceMuted,
-  },
-  qrLabel: {
-    fontSize: 12,
-    color: Palette.textSecondary,
-    marginBottom: Spacing.sm,
-    fontWeight: '600',
-  },
-  qrImage: {
-    width: 160,
-    height: 160,
-    borderRadius: Radius.md,
-    marginBottom: Spacing.sm,
-  },
-  qrCode: {
-    fontFamily: 'monospace',
-    fontSize: 13,
-    color: Palette.text,
-  },
-  qrHint: {
-    marginTop: Spacing.sm,
-    fontSize: 12,
-    color: Palette.textMuted,
-    textAlign: 'center',
   },
 });

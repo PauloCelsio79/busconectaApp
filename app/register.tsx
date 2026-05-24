@@ -1,4 +1,3 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import {
@@ -16,32 +15,17 @@ import { AppTextInput } from '@/components/ui/app-text-input';
 import { FocusedStatusBar } from '@/components/ui/focused-status-bar';
 import { PrimaryButton } from '@/components/ui/primary-button';
 import { ScreenHeader } from '@/components/ui/screen-header';
+import { useAuth } from '@/contexts/AuthContext';
+import { ApiError } from '@/lib/api/client';
 import { Brand, Palette, Radius, Spacing } from '@/constants/theme';
-
-interface StoredUser {
-  name: string;
-  email: string;
-  password: string;
-}
-
-async function loadUsers(): Promise<StoredUser[]> {
-  const json = await AsyncStorage.getItem('users');
-  if (!json) return [];
-  try {
-    return JSON.parse(json) as StoredUser[];
-  } catch {
-    return [];
-  }
-}
-
-async function saveUsers(users: StoredUser[]) {
-  await AsyncStorage.setItem('users', JSON.stringify(users));
-}
 
 export default function RegisterScreen() {
   const router = useRouter();
+  const { register } = useAuth();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
+  const [telefone, setTelefone] = useState('');
+  const [bi, setBi] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -50,7 +34,7 @@ export default function RegisterScreen() {
   async function handleRegister() {
     setFormError('');
 
-    if (!name.trim() || !email.trim() || !password || !confirmPassword) {
+    if (!name.trim() || !email.trim() || !telefone.trim() || !bi.trim() || !password || !confirmPassword) {
       setFormError('Preencha todos os campos obrigatórios.');
       return;
     }
@@ -67,28 +51,21 @@ export default function RegisterScreen() {
 
     setLoading(true);
     try {
-      const users = await loadUsers();
-      const alreadyExists = users.some(
-        (u) => u.email.trim().toLowerCase() === email.trim().toLowerCase()
-      );
-
-      if (alreadyExists) {
-        setFormError('Já existe uma conta com este e-mail.');
-        return;
-      }
-
-      const newUser: StoredUser = {
-        name: name.trim(),
+      await register({
+        nome: name.trim(),
         email: email.trim().toLowerCase(),
         password,
-      };
-
-      await saveUsers([...users, newUser]);
-      await AsyncStorage.setItem('currentUserEmail', newUser.email);
-
+        password_confirmation: confirmPassword,
+        telefone: telefone.trim(),
+        bi: bi.trim(),
+      });
       router.replace('/dashboard');
-    } catch {
-      setFormError('Não foi possível criar a conta. Tente novamente.');
+    } catch (err) {
+      setFormError(
+        err instanceof ApiError
+          ? err.message
+          : 'Não foi possível criar a conta. Tente novamente.'
+      );
     } finally {
       setLoading(false);
     }
@@ -133,6 +110,22 @@ export default function RegisterScreen() {
             autoCapitalize="none"
             value={email}
             onChangeText={setEmail}
+          />
+
+          <AppTextInput
+            label="Telefone"
+            placeholder="+244900000099"
+            keyboardType="phone-pad"
+            value={telefone}
+            onChangeText={setTelefone}
+          />
+
+          <AppTextInput
+            label="Bilhete de identidade (BI)"
+            placeholder="000111222LA033"
+            autoCapitalize="characters"
+            value={bi}
+            onChangeText={setBi}
           />
 
           <AppTextInput
