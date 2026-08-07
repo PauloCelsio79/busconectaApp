@@ -1,27 +1,29 @@
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
-  Image,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    Image,
+    RefreshControl,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { EmptyState } from '@/components/ui/empty-state';
 import { FocusedStatusBar } from '@/components/ui/focused-status-bar';
 import { ScreenHeader } from '@/components/ui/screen-header';
+import { Brand, Palette, Radius, Shadow, Spacing } from '@/constants/theme';
 import { useAuth } from '@/contexts/AuthContext';
 import { listarReservas } from '@/lib/api/reservas';
+import { enriquecerPassageirosBilhete } from '@/lib/bilhete-storage';
 import {
-  isBilheteAtivo,
-  mapApiReservasToApp,
-  type ReservaApp,
+    buildBilheteQrPayload,
+    isBilheteAtivo,
+    mapApiReservasToApp,
+    type ReservaApp,
 } from '@/lib/mappers/reserva';
-import { Brand, Palette, Radius, Shadow, Spacing } from '@/constants/theme';
 
 export default function MeusTicketsScreen() {
   const { isAuthenticated } = useAuth();
@@ -35,7 +37,14 @@ export default function MeusTicketsScreen() {
     setLoading(true);
     try {
       const raw = await listarReservas();
-      setReservas(mapApiReservasToApp(raw).filter(isBilheteAtivo));
+      const mapeadas = mapApiReservasToApp(raw).filter(isBilheteAtivo);
+      const comPassageiros = await Promise.all(
+        mapeadas.map(async (r) => ({
+          ...r,
+          passageiros: await enriquecerPassageirosBilhete(r.id, r.codigo, r.passageiros),
+        }))
+      );
+      setReservas(comPassageiros);
     } catch {
       setReservas([]);
     } finally {
@@ -89,7 +98,7 @@ export default function MeusTicketsScreen() {
 
         {reservas.map((r) => {
           const isOpen = ticketAberto === r.id;
-          const qrCode = r.codigo ? `TICKET-${r.codigo}` : `TICKET-${r.id}`;
+          const qrCode = buildBilheteQrPayload(r);
 
           return (
             <TouchableOpacity
@@ -116,9 +125,24 @@ export default function MeusTicketsScreen() {
                     style={styles.qr}
                     accessibilityLabel="Código QR do bilhete"
                   />
-                  <Text style={styles.qrHint}>{qrCode}</Text>
+                  <Text style={styles.qrHint} numberOfLines={4}>
+                    {r.codigo ? `TICKET-${r.codigo}` : `TICKET-${r.id}`}
+                  </Text>
+
+                  {r.passageiros.length > 0 ? (
+                    <View style={styles.passengersBlock}>
+                      <Text style={styles.passengersTitle}>Passageiros</Text>
+                      {r.passageiros.map((p) => (
+                        <Text key={`${r.id}-${p.nome}-${p.assento ?? ''}`} style={styles.passengerName}>
+                          {p.nome}
+                          {p.assento ? ` · Assento ${p.assento}` : ''}
+                        </Text>
+                      ))}
+                    </View>
+                  ) : null}
+
                   <Text style={styles.meta}>
-                    {r.agencia} · Assentos {r.assentos.join(', ') || '—'}
+                    {r.agencia} 
                   </Text>
                   <Text style={styles.price}>{r.preco}</Text>
                 </View>
@@ -192,6 +216,25 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: Palette.textMuted,
     marginBottom: Spacing.sm,
+    textAlign: 'center',
+  },
+  passengersBlock: {
+    width: '100%',
+    marginBottom: Spacing.md,
+    paddingHorizontal: Spacing.sm,
+  },
+  passengersTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: Palette.text,
+    marginBottom: Spacing.xs,
+    textAlign: 'center',
+  },
+  passengerName: {
+    fontSize: 14,
+    color: Palette.textSecondary,
+    textAlign: 'center',
+    marginBottom: 2,
   },
   meta: {
     fontSize: 13,

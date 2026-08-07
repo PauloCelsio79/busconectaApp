@@ -1,5 +1,5 @@
 import { apiRequest } from '@/lib/api/client';
-import { setToken, clearToken } from '@/lib/auth-storage';
+import { clearToken, getToken, setToken } from '@/lib/auth-storage';
 import type { ApiUser, AuthPayload } from '@/lib/types/api';
 
 export interface LoginInput {
@@ -35,23 +35,25 @@ export async function login(input: LoginInput): Promise<ApiUser> {
   return user;
 }
 
-export async function register(input: RegisterInput): Promise<ApiUser> {
+export async function register(input: RegisterInput): Promise<void> {
   const data = await apiRequest<AuthPayload>('/auth/register', {
     method: 'POST',
     auth: false,
     body: JSON.stringify(input),
   });
-  const { token, user } = normalizeAuthPayload(data);
-  await setToken(token);
-  return user;
+  normalizeAuthPayload(data);
 }
 
 export async function logout(): Promise<void> {
-  try {
-    await apiRequest<null>('/auth/logout', { method: 'POST' });
-  } finally {
-    await clearToken();
+  const token = await getToken();
+  if (token) {
+    try {
+      await apiRequest<null>('/auth/logout', { method: 'POST' });
+    } catch {
+      // Sessão expirada ou API indisponível — limpar credenciais localmente na mesma.
+    }
   }
+  await clearToken();
 }
 
 export async function fetchMe(): Promise<ApiUser> {

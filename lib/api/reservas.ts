@@ -9,8 +9,11 @@ function normalizeList<T>(data: T[] | { data?: T[] } | null | undefined): T[] {
 }
 
 export async function listarReservas(): Promise<ApiReserva[]> {
-  const data = await apiRequest<ApiReserva[] | { data?: ApiReserva[] }>('/app/reservas');
-  return normalizeList(data);
+  const data = await apiRequest<ApiReserva[] | { items?: ApiReserva[] }>('/app/reservas');
+  if (!data) return [];
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data.items)) return data.items;
+  return [];
 }
 
 export async function criarReserva(payload: CreateReservaPayload): Promise<ApiReserva> {

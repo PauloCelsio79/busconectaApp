@@ -23,6 +23,7 @@ export interface AuthPayload {
 
 export interface ApiEmpresa {
   id?: number;
+  nome?: string;
   nome_empresa?: string;
   nome_comercial?: string;
 }
@@ -40,7 +41,7 @@ export interface ApiRota {
   origem?: string;
   destino?: string;
   distancia_km?: number;
-  tempo_estimado?: string;
+  tempo_estimado?: number | string;
   paragens?: ApiParagem[];
 }
 
@@ -73,6 +74,20 @@ export interface ApiAssento {
   estado?: string;
 }
 
+export interface ApiReservaAssentoLinha {
+  id: number;
+  numero?: number | string;
+  nome_passageiro?: string | null;
+  bi_passageiro?: string | null;
+  nacionalidade_passageiro?: string | null;
+}
+
+export interface ApiReservaPassageiroTitular {
+  nome?: string;
+  bi?: string | null;
+  nacionalidade?: string | null;
+}
+
 export interface ApiReserva {
   id: number;
   codigo_reserva?: string;
@@ -83,13 +98,21 @@ export interface ApiReserva {
   metodo_pagamento?: string;
   referencia_pagamento?: string;
   viagem?: ApiViagem | null;
-  assentos?: ApiAssento[];
+  assentos?: (ApiAssento | ApiReservaAssentoLinha)[];
   reserva_assentos?: { assento?: ApiAssento; assento_id?: number }[];
+  passageiro?: ApiReservaPassageiroTitular | null;
+}
+
+export interface CreateReservaPassageiroPayload {
+  nome: string;
+  bi?: string;
+  nacionalidade?: string;
 }
 
 export interface CreateReservaPayload {
   viagem_id: number;
   assento_ids: number[];
+  passageiros?: CreateReservaPassageiroPayload[];
   metodo_pagamento: 'multicaixa' | 'transferencia' | 'cartao';
   referencia_pagamento?: string;
 }

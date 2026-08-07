@@ -1,16 +1,16 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Alert,
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    Alert,
+    KeyboardAvoidingView,
+    Modal,
+    Platform,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -24,6 +24,7 @@ import { Brand, Palette, Radius, Shadow, Spacing, Typography } from '@/constants
 import { ApiError } from '@/lib/api/client';
 import { confirmarPagamento, criarReserva } from '@/lib/api/reservas';
 import { obterAssentos } from '@/lib/api/viagens';
+import { guardarPassageirosBilhete } from '@/lib/bilhete-storage';
 import { assentoNumero, assentoOcupado } from '@/lib/mappers/viagem';
 import type { ApiAssento } from '@/lib/types/api';
 import { formatPreco, parsePreco } from '@/lib/utils/format';
@@ -83,6 +84,10 @@ export default function Reserva() {
   const [passengerError, setPassengerError] = useState('');
   const [seatHint, setSeatHint] = useState('');
   const [saveError, setSaveError] = useState('');
+  const [stepAtual, setStepAtual] = useState(1);
+  const [showBirthDatePicker, setShowBirthDatePicker] = useState(false);
+  const [birthCalendarMonth, setBirthCalendarMonth] = useState(new Date().getMonth());
+  const [birthCalendarYear, setBirthCalendarYear] = useState(new Date().getFullYear());
 
   const assentosPorNumero = useMemo(() => {
     const map = new Map<number, ApiAssento>();
@@ -103,14 +108,18 @@ export default function Reserva() {
 
   const precoUnitario = parsePreco(preco);
 
-  const numerosSelecionados = useMemo(
+  const numerosSelecionadosPorPassageiro = useMemo(
     () =>
       assentosSelecionados
         .map((id) => assentosApi.find((a) => a.id === id))
         .filter(Boolean)
-        .map((a) => assentoNumero(a!))
-        .sort((a, b) => a - b),
+        .map((a) => assentoNumero(a!)),
     [assentosSelecionados, assentosApi]
+  );
+
+  const numerosSelecionados = useMemo(
+    () => [...numerosSelecionadosPorPassageiro].sort((a, b) => a - b),
+    [numerosSelecionadosPorPassageiro]
   );
 
   const carregarAssentos = useCallback(async () => {
@@ -123,6 +132,9 @@ export default function Reserva() {
     try {
       const lista = await obterAssentos(viagemId);
       setAssentosApi(lista);
+      if (lista.length === 0) {
+        setSeatHint('Nenhum assento disponível para esta viagem.');
+      }
     } catch (err) {
       setSeatHint(
         err instanceof ApiError
@@ -157,29 +169,54 @@ export default function Reserva() {
 
   const steps = useMemo(
     () => [
-      { label: 'Passageiros', done: passageiroPreenchido },
-      { label: 'Assento', done: assentosCompletos },
+      { label: 'Passageiros', done: stepAtual > 1 },
+      { label: 'Assento', done: stepAtual > 2 },
       { label: 'Pagamento', done: pago },
     ],
-    [passageiroPreenchido, assentosCompletos, pago]
+    [stepAtual, pago]
   );
+
+  function podeAvancarStep() {
+    if (stepAtual === 1) return passageiroPreenchido;
+    if (stepAtual === 2) return assentosCompletos;
+    return true;
+  }
+
+  function avancarStep() {
+    if (!podeAvancarStep()) {
+      if (stepAtual === 1) {
+        setPassengerError('Adicione pelo menos um passageiro.');
+      } else if (stepAtual === 2) {
+        setSeatHint(`Selecione ${numPassageiros} assento(s) — um por passageiro.`);
+      }
+      return;
+    }
+    setPassengerError('');
+    setSeatHint('');
+    setStepAtual((s) => Math.min(s + 1, 3));
+  }
+
+  function voltarStep() {
+    setStepAtual((s) => Math.max(s - 1, 1));
+  }
 
   function toggleAssento(numero: number) {
     setSeatHint('');
 
     const assento = assentosPorNumero.get(numero);
     if (!assento) {
-      setSeatHint('Assento não disponível nesta viagem.');
+      setSeatHint(`Assento ${numero} não disponível nesta viagem.`);
       return;
     }
 
     if (assentoOcupado(assento)) {
-      setSeatHint('Este assento já está ocupado.');
+      setSeatHint(`Assento ${numero} já está ocupado.`);
       return;
     }
 
     if (assentosSelecionados.includes(assento.id)) {
       setAssentosSelecionados(assentosSelecionados.filter((id) => id !== assento.id));
+      setSeatHint(`Assento ${numero} desmarcado.`);
       return;
     }
 
@@ -194,6 +231,7 @@ export default function Reserva() {
     }
 
     setAssentosSelecionados([...assentosSelecionados, assento.id]);
+    setSeatHint(`Assento ${numero} selecionado.`);
   }
 
   async function efetuarPagamento() {
@@ -223,11 +261,29 @@ export default function Reserva() {
       const reserva = await criarReserva({
         viagem_id: viagemId,
         assento_ids: assentosSelecionados,
+        passageiros: passageirosIncluidos.map((p) => ({
+          nome: p.nome,
+          bi: p.bilhete,
+          nacionalidade: p.nacionalidade,
+        })),
         metodo_pagamento: metodo,
         referencia_pagamento: referencia,
       });
 
       await confirmarPagamento(reserva.id, referencia);
+
+      const passageirosBilhete = passageirosIncluidos.map((p, index) => {
+        const assentoId = assentosSelecionados[index];
+        const assento = assentosApi.find((a) => a.id === assentoId);
+        return {
+          nome: p.nome,
+          assento: assento ? assentoNumero(assento) : undefined,
+        };
+      });
+      const chaves = [String(reserva.id)];
+      if (reserva.codigo_reserva) chaves.push(reserva.codigo_reserva);
+      await guardarPassageirosBilhete(chaves, passageirosBilhete);
+
       setPago(true);
     } catch (err) {
       setSaveError(
@@ -276,6 +332,36 @@ export default function Reserva() {
     resetModalFields();
   }
 
+  const NOME_REGEX = /^[A-Za-zÀ-ÖØ-öø-ÿÃãÕõÇçÁáÉéÍíÓóÚúÂâÊêÔô\s'-]+$/;
+
+  function sanitizeNome(text: string) {
+    return text.replace(/[^A-Za-zÀ-ÖØ-öø-ÿÃãÕõÇçÁáÉéÍíÓóÚúÂâÊêÔô\s'-]/g, '');
+  }
+
+  const birthMonthNames = [
+    'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+    'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro',
+  ];
+
+  function openBirthDatePicker() {
+    const today = new Date();
+    setBirthCalendarMonth(today.getMonth());
+    setBirthCalendarYear(today.getFullYear() - 20);
+    setShowBirthDatePicker(true);
+  }
+
+  function handleBirthDateSelect(day: number) {
+    const dd = String(day).padStart(2, '0');
+    const mm = String(birthCalendarMonth + 1).padStart(2, '0');
+    const yyyy = String(birthCalendarYear);
+    setModalNascimento(`${dd}/${mm}/${yyyy}`);
+    setShowBirthDatePicker(false);
+  }
+
+  const birthMonthDays = new Date(birthCalendarYear, birthCalendarMonth + 1, 0).getDate();
+  const birthFirstWeekday = (new Date(birthCalendarYear, birthCalendarMonth, 1).getDay() + 6) % 7;
+  const birthWeekdays = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
+
   function handleSavePassenger() {
     if (!modalNome.trim() || !modalBI.trim()) {
       setPassengerError(
@@ -283,6 +369,10 @@ export default function Reserva() {
           ? 'Informe nome completo e número do BI.'
           : 'Informe nome completo e número do passaporte.'
       );
+      return;
+    }
+    if (!NOME_REGEX.test(modalNome.trim())) {
+      setPassengerError('O nome contém caracteres inválidos. Use apenas letras e espaços.');
       return;
     }
     setPassengerError('');
@@ -342,9 +432,10 @@ export default function Reserva() {
 
   function renderAssento(numero: number) {
     const assento = assentosPorNumero.get(numero);
-    const ocupado = assento ? assentoOcupado(assento) : true;
+    const ocupado = assento ? assentoOcupado(assento) : false;
     const selecionado = assento ? assentosSelecionados.includes(assento.id) : false;
-    const bloqueado = numPassageiros === 0 || assentosLoading || !assento;
+    const indisponivel = !assento;
+    const bloqueado = numPassageiros === 0 || assentosLoading || indisponivel;
 
     return (
       <Pressable
@@ -358,7 +449,15 @@ export default function Reserva() {
         onPress={() => toggleAssento(numero)}
         disabled={ocupado || bloqueado}
         accessibilityRole="button"
-        accessibilityLabel={`Assento ${numero}${ocupado ? ', ocupado' : selecionado ? ', selecionado' : ', disponível'}`}
+        accessibilityLabel={`Assento ${numero}${
+          indisponivel
+            ? ', indisponível'
+            : ocupado
+              ? ', ocupado'
+              : selecionado
+                ? ', selecionado'
+                : ', disponível'
+        }`}
         accessibilityState={{ selected: selecionado, disabled: ocupado }}
       >
         <Text
@@ -445,6 +544,7 @@ export default function Reserva() {
           </View>
         </View>
 
+        {stepAtual === 1 && (
         <View style={styles.block}>
           <SectionTitle
             title="Adicionar passageiro"
@@ -534,7 +634,9 @@ export default function Reserva() {
             </Text>
           </View>
         </View>
+        )}
 
+        {stepAtual === 2 && (
         <View style={styles.block}>
           <SectionTitle
             title="Escolher assento"
@@ -565,6 +667,18 @@ export default function Reserva() {
 
           {assentosLoading ? (
             <Text style={styles.seatSummary}>A carregar mapa de assentos...</Text>
+          ) : assentosApi.length === 0 ? (
+            <View style={styles.errorBanner}>
+              <Text style={styles.errorBannerText}>
+                Não foi possível carregar os assentos desta viagem. Tente voltar e selecionar novamente.
+              </Text>
+              <PrimaryButton
+                title="Tentar novamente"
+                onPress={() => void carregarAssentos()}
+                variant="outline"
+                style={{ marginTop: Spacing.md }}
+              />
+            </View>
           ) : null}
 
           <View style={styles.busLayout}>
@@ -599,7 +713,7 @@ export default function Reserva() {
               {passageirosIncluidos.map((p, index) => (
                 <Text key={p.id} style={styles.seatAssignItem}>
                   {p.nome.split(' ')[0]}: assento{' '}
-                  {numerosSelecionados[index] ?? '—'}
+                  {numerosSelecionadosPorPassageiro[index] ?? '—'}
                 </Text>
               ))}
             </View>
@@ -607,7 +721,9 @@ export default function Reserva() {
 
           {seatHint ? <Text style={styles.seatHint}>{seatHint}</Text> : null}
         </View>
+        )}
 
+        {stepAtual === 3 && (
         <View style={styles.block}>
           <SectionTitle title="Pagamento" hint="Passo 3 de 3" />
           <Pressable
@@ -641,6 +757,7 @@ export default function Reserva() {
             </Text>
           </Pressable>
         </View>
+        )}
 
         {saveError ? (
           <View style={styles.errorBanner}>
@@ -672,7 +789,7 @@ export default function Reserva() {
       {!pago ? (
         <SafeAreaView edges={['bottom']} style={styles.footer}>
           <View style={styles.footerInner}>
-            <View>
+            <View style={styles.footerTotal}>
               <Text style={styles.footerLabel}>
                 {numPassageiros > 0
                   ? `Total · ${numPassageiros} passageiro(s)`
@@ -682,13 +799,37 @@ export default function Reserva() {
                 {numPassageiros > 0 ? `${totalFormatado} Kz` : `${preco || '0'} Kz`}
               </Text>
             </View>
-            <PrimaryButton
-              title={processando || saving ? 'A processar...' : 'Pagar agora'}
-              onPress={efetuarPagamento}
-              loading={processando || saving}
-              disabled={!assentosCompletos || !passageiroPreenchido}
-              style={styles.footerBtn}
-            />
+            <View style={styles.footerActions}>
+              {stepAtual > 1 ? (
+                <Pressable
+                  style={styles.footerBackBtn}
+                  onPress={voltarStep}
+                  accessibilityRole="button"
+                  accessibilityLabel="Voltar ao passo anterior"
+                >
+                  <Text style={styles.footerBackIcon}>←</Text>
+                </Pressable>
+              ) : null}
+              <PrimaryButton
+                title={
+                  stepAtual === 3
+                    ? processando || saving
+                      ? 'A processar...'
+                      : 'Pagar agora'
+                    : 'Continuar'
+                }
+                onPress={stepAtual === 3 ? efetuarPagamento : avancarStep}
+                loading={processando || saving}
+                disabled={
+                  stepAtual === 1
+                    ? !passageiroPreenchido
+                    : stepAtual === 2
+                      ? !assentosCompletos
+                      : false
+                }
+                style={styles.footerNextBtn}
+              />
+            </View>
           </View>
         </SafeAreaView>
       ) : null}
@@ -727,7 +868,7 @@ export default function Reserva() {
                 label="Nome completo"
                 placeholder="Como no documento"
                 value={modalNome}
-                onChangeText={setModalNome}
+                onChangeText={(v) => setModalNome(sanitizeNome(v))}
                 autoCapitalize="words"
               />
               <AppTextInput
@@ -746,12 +887,16 @@ export default function Reserva() {
               />
               <View style={styles.modalRow}>
                 <View style={styles.modalCol}>
-                  <AppTextInput
-                    label="Nascimento"
-                    placeholder="DD/MM/AAAA"
-                    value={modalNascimento}
-                    onChangeText={setModalNascimento}
-                  />
+                  <Text style={styles.modalFieldLabel}>Nascimento</Text>
+                  <Pressable
+                    style={styles.nationalityChip}
+                    onPress={openBirthDatePicker}
+                  >
+                    <Text style={modalNascimento ? styles.nationalityText : styles.birthPlaceholder}>
+                      {modalNascimento || 'DD/MM/AAAA'}
+                    </Text>
+                    <Text style={styles.nationalityArrow}>📅</Text>
+                  </Pressable>
                 </View>
                 <View style={styles.modalCol}>
                   <Text style={styles.modalFieldLabel}>Nacionalidade</Text>
@@ -773,6 +918,71 @@ export default function Reserva() {
                 onPress={handleSavePassenger}
               />
             </ScrollView>
+
+            <Modal visible={showBirthDatePicker} transparent animationType="fade">
+              <Pressable style={styles.birthOverlay} onPress={() => setShowBirthDatePicker(false)}>
+                <Pressable style={styles.birthContainer} onPress={() => {}}>
+                  <Text style={styles.birthTitle}>Data de nascimento</Text>
+                  <View style={styles.birthMonthRow}>
+                    <TouchableOpacity
+                      style={styles.birthMonthBtn}
+                      onPress={() => {
+                        setBirthCalendarMonth((m) => {
+                          if (m === 0) { setBirthCalendarYear((y) => y - 1); return 11; }
+                          return m - 1;
+                        });
+                      }}
+                    >
+                      <Text style={styles.birthMonthBtnText}>‹</Text>
+                    </TouchableOpacity>
+                    <Text style={styles.birthMonthName}>
+                      {birthMonthNames[birthCalendarMonth]} {birthCalendarYear}
+                    </Text>
+                    <TouchableOpacity
+                      style={styles.birthMonthBtn}
+                      onPress={() => {
+                        const now = new Date();
+                        if (birthCalendarYear > now.getFullYear() || (birthCalendarYear === now.getFullYear() && birthCalendarMonth >= now.getMonth())) return;
+                        setBirthCalendarMonth((m) => {
+                          if (m === 11) { setBirthCalendarYear((y) => y + 1); return 0; }
+                          return m + 1;
+                        });
+                      }}
+                    >
+                      <Text style={styles.birthMonthBtnText}>›</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <View style={styles.birthWeekRow}>
+                    {birthWeekdays.map((d) => (
+                      <Text key={d} style={styles.birthWeekLabel}>{d}</Text>
+                    ))}
+                  </View>
+                  <View style={styles.birthDaysGrid}>
+                    {Array.from({ length: birthFirstWeekday }).map((_, i) => (
+                      <View key={`e-${i}`} style={styles.birthDayCell} />
+                    ))}
+                    {Array.from({ length: birthMonthDays }).map((_, i) => {
+                      const day = i + 1;
+                      const thisDate = new Date(birthCalendarYear, birthCalendarMonth, day);
+                      const isFuture = thisDate > new Date();
+                      return (
+                        <View key={day} style={styles.birthDayCell}>
+                          <TouchableOpacity
+                            style={[styles.birthDayBtn, isFuture && styles.birthDayDisabled]}
+                            disabled={isFuture}
+                            onPress={() => handleBirthDateSelect(day)}
+                          >
+                            <Text style={[styles.birthDayText, isFuture && styles.birthDayTextDisabled]}>
+                              {day}
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+                      );
+                    })}
+                  </View>
+                </Pressable>
+              </Pressable>
+            </Modal>
           </Pressable>
         </Pressable>
         </KeyboardAvoidingView>
@@ -822,7 +1032,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     padding: Spacing.lg,
-    paddingBottom: 120,
+    paddingBottom: 140,
   },
   summaryCard: {
     backgroundColor: Palette.surface,
@@ -1302,9 +1512,13 @@ const styles = StyleSheet.create({
   footerInner: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.md,
-    gap: Spacing.lg,
+    gap: Spacing.md,
+  },
+  footerTotal: {
+    minWidth: 80,
   },
   footerLabel: {
     fontSize: 11,
@@ -1315,7 +1529,28 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: Brand.primary,
   },
-  footerBtn: {
+  footerActions: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+  },
+  footerBackBtn: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    borderWidth: 1.5,
+    borderColor: Brand.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: Palette.surface,
+  },
+  footerBackIcon: {
+    fontSize: 22,
+    color: Brand.primary,
+    fontWeight: '700',
+  },
+  footerNextBtn: {
     flex: 1,
   },
   modalKeyboard: {
@@ -1392,5 +1627,91 @@ const styles = StyleSheet.create({
   nationalityArrow: {
     color: Brand.primary,
     fontWeight: '700',
+  },
+  birthPlaceholder: {
+    fontSize: 15,
+    color: Palette.textMuted,
+  },
+  birthOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 18,
+  },
+  birthContainer: {
+    width: '100%',
+    maxWidth: 360,
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 18,
+  },
+  birthTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#191919',
+    marginBottom: 12,
+  },
+  birthMonthRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  birthMonthBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F2F2F2',
+  },
+  birthMonthBtnText: {
+    fontSize: 18,
+    color: '#191919',
+  },
+  birthMonthName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#191919',
+  },
+  birthWeekRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  birthWeekLabel: {
+    width: 40,
+    textAlign: 'center',
+    fontSize: 12,
+    color: '#666',
+  },
+  birthDaysGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+  },
+  birthDayCell: {
+    width: '14.28%',
+    aspectRatio: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  birthDayBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#F8F8F8',
+  },
+  birthDayDisabled: {
+    backgroundColor: '#F0F0F0',
+  },
+  birthDayText: {
+    color: '#191919',
+  },
+  birthDayTextDisabled: {
+    color: '#C1C1C1',
   },
 });

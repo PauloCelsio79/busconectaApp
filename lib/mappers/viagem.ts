@@ -42,12 +42,29 @@ function paragemCoords(p?: ApiParagem) {
   return { latitude: lat, longitude: lng };
 }
 
+function formatarDuracaoMinutos(mins: number): string {
+  const horas = Math.floor(mins / 60);
+  const resto = mins % 60;
+  if (horas && resto) return `${horas}h${resto}min`;
+  if (horas) return `${horas}h`;
+  return `${resto}min`;
+}
+
 function calcularDuracao(
   horaPartida?: string,
   horaChegada?: string,
-  tempoEstimado?: string
+  tempoEstimado?: number | string
 ): string {
-  if (tempoEstimado?.trim()) return tempoEstimado.trim();
+  if (tempoEstimado != null) {
+    const estimado =
+      typeof tempoEstimado === 'number'
+        ? tempoEstimado
+        : parseInt(tempoEstimado.trim(), 10);
+    if (Number.isFinite(estimado) && estimado > 0) {
+      return formatarDuracaoMinutos(estimado);
+    }
+  }
+
   if (!horaPartida || !horaChegada) return '—';
 
   const [h1, m1] = horaPartida.split(':').map(Number);
@@ -55,11 +72,7 @@ function calcularDuracao(
   let mins = (h2 ?? 0) * 60 + (m2 ?? 0) - ((h1 ?? 0) * 60 + (m1 ?? 0));
   if (mins < 0) mins += 24 * 60;
 
-  const horas = Math.floor(mins / 60);
-  const resto = mins % 60;
-  if (horas && resto) return `${horas}h${resto}min`;
-  if (horas) return `${horas}h`;
-  return `${resto}min`;
+  return formatarDuracaoMinutos(mins);
 }
 
 export function mapApiViagemToViagem(raw: ApiViagem): Viagem {
@@ -69,6 +82,7 @@ export function mapApiViagemToViagem(raw: ApiViagem): Viagem {
 
   const agencia =
     empresa.nome_comercial ??
+    empresa.nome ??
     empresa.nome_empresa ??
     raw.empresa_nome ??
     'Operador';
@@ -113,6 +127,7 @@ export function mapApiViagemToViagem(raw: ApiViagem): Viagem {
 }
 
 export function mapApiViagensToViagens(lista: ApiViagem[]): Viagem[] {
+  console.log('[mapApiViagensToViagens] mapear', lista.length, 'viagem(ns)');
   return lista.map(mapApiViagemToViagem);
 }
 

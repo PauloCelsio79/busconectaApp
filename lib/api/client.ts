@@ -1,5 +1,5 @@
-import { API_BASE_URL } from '@/lib/config';
 import { getToken } from '@/lib/auth-storage';
+import { API_BASE_URL } from '@/lib/config';
 import type { ApiEnvelope } from '@/lib/types/api';
 
 export class ApiError extends Error {

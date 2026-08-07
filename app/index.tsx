@@ -1,5 +1,5 @@
-import { useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
+import { useState } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -20,18 +20,16 @@ import { ApiError } from '@/lib/api/client';
 
 export default function LoginScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ registered?: string; email?: string }>();
   const { login, isAuthenticated, isLoading: authLoading } = useAuth();
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(() => params.email?.trim() ?? '');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [formError, setFormError] = useState('');
 
-  useEffect(() => {
-    if (!authLoading && isAuthenticated) {
-      router.replace('/dashboard');
-    }
-  }, [authLoading, isAuthenticated, router]);
-
+  if (!authLoading && isAuthenticated) {
+    return <Redirect href="/dashboard" />;
+  }
   async function handleLogin() {
     setFormError('');
 
@@ -43,7 +41,6 @@ export default function LoginScreen() {
     setLoading(true);
     try {
       await login(email, password);
-      router.replace('/dashboard');
     } catch (err) {
       setFormError(
         err instanceof ApiError
@@ -90,6 +87,14 @@ export default function LoginScreen() {
             <Text style={styles.cardTitle}>Entrar na conta</Text>
             <Text style={styles.cardSubtitle}>Aceda às suas viagens e reservas</Text>
 
+            {params.registered === '1' ? (
+              <View style={styles.successBanner} accessibilityRole="alert">
+                <Text style={styles.successBannerText}>
+                  Conta criada com sucesso. Inicie sessão para continuar.
+                </Text>
+              </View>
+            ) : null}
+
             {formError ? (
               <View style={styles.errorBanner} accessibilityRole="alert">
                 <Text style={styles.errorBannerText}>{formError}</Text>
@@ -131,8 +136,6 @@ export default function LoginScreen() {
               <Text style={styles.linkText}>Criar nova conta</Text>
             </TouchableOpacity>
           </View>
-
-
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -209,6 +212,19 @@ const styles = StyleSheet.create({
     color: Palette.textSecondary,
     marginBottom: Spacing.xl,
   },
+  successBanner: {
+    backgroundColor: '#E8F5E9',
+    borderRadius: Radius.md,
+    padding: Spacing.md,
+    marginBottom: Spacing.lg,
+    borderLeftWidth: 3,
+    borderLeftColor: '#2E7D32',
+  },
+  successBannerText: {
+    color: '#2E7D32',
+    fontSize: 14,
+    fontWeight: '600',
+  },
   errorBanner: {
     backgroundColor: Brand.primaryLight,
     borderRadius: Radius.md,
@@ -242,3 +258,4 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.6)',
   },
 });
+

@@ -33,10 +33,23 @@ export async function obterViagem(id: number): Promise<ApiViagem> {
   return apiRequest<ApiViagem>(`/viagens/${id}`, { auth: false });
 }
 
+function extractAssentos(
+  data: ApiAssento[] | { data?: ApiAssento[] } | { assentos?: ApiAssento[] } | null | undefined
+): ApiAssento[] {
+  if (!data) return [];
+  if (Array.isArray(data)) return data;
+  if (Array.isArray((data as { data?: ApiAssento[] }).data)) {
+    return (data as { data?: ApiAssento[] }).data ?? [];
+  }
+  if (Array.isArray((data as { assentos?: ApiAssento[] }).assentos)) {
+    return (data as { assentos?: ApiAssento[] }).assentos ?? [];
+  }
+  return [];
+}
+
 export async function obterAssentos(viagemId: number): Promise<ApiAssento[]> {
-  const data = await apiRequest<ApiAssento[] | { data?: ApiAssento[] }>(
-    `/viagens/${viagemId}/assentos`,
-    { auth: false }
-  );
-  return normalizeList(data);
+  const data = await apiRequest<
+    ApiAssento[] | { data?: ApiAssento[] } | { assentos?: ApiAssento[] }
+  >(`/viagens/${viagemId}/assentos`, { auth: false });
+  return extractAssentos(data);
 }

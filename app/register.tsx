@@ -1,4 +1,4 @@
-import { useRouter } from 'expo-router';
+import { Redirect, useRouter } from 'expo-router';
 import { useState } from 'react';
 import {
   KeyboardAvoidingView,
@@ -21,7 +21,7 @@ import { Brand, Palette, Radius, Spacing } from '@/constants/theme';
 
 export default function RegisterScreen() {
   const router = useRouter();
-  const { register } = useAuth();
+  const { register, isAuthenticated, isLoading: authLoading } = useAuth();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [telefone, setTelefone] = useState('');
@@ -30,6 +30,10 @@ export default function RegisterScreen() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [formError, setFormError] = useState('');
+
+  if (!authLoading && isAuthenticated) {
+    return <Redirect href="/dashboard" />;
+  }
 
   async function handleRegister() {
     setFormError('');
@@ -59,7 +63,10 @@ export default function RegisterScreen() {
         telefone: telefone.trim(),
         bi: bi.trim(),
       });
-      router.replace('/dashboard');
+      router.replace({
+        pathname: '/',
+        params: { registered: '1', email: email.trim().toLowerCase() },
+      });
     } catch (err) {
       setFormError(
         err instanceof ApiError

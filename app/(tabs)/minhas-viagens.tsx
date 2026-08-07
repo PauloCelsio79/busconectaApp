@@ -1,4 +1,4 @@
-import { router, useFocusEffect } from 'expo-router';
+import { Redirect, router, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
   Alert,
@@ -58,13 +58,15 @@ export default function MinhasViagensScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      if (!authLoading && !isAuthenticated) {
-        router.replace('/');
-        return;
+      if (!authLoading && isAuthenticated) {
+        void carregarReservas();
       }
-      void carregarReservas();
     }, [carregarReservas, authLoading, isAuthenticated])
   );
+
+  if (!authLoading && !isAuthenticated) {
+    return <Redirect href="/" />;
+  }
 
   async function handleCancelar(id: string) {
     Alert.alert(

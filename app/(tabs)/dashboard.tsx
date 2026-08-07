@@ -1,7 +1,9 @@
-import { router } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { Redirect, router } from 'expo-router';
+import { useState } from 'react';
 import {
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -13,8 +15,9 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { FocusedStatusBar } from '@/components/ui/focused-status-bar';
-import { useAuth } from '@/contexts/AuthContext';
+import { LOCALIDADES_ANGOLA } from '@/constants/provincias';
 import { Brand, Palette, Radius, Spacing } from '@/constants/theme';
+import { useAuth } from '@/contexts/AuthContext';
 
 export default function Dashboard() {
   const { user, isLoading: authLoading, logout, isAuthenticated } = useAuth();
@@ -33,12 +36,25 @@ export default function Dashboard() {
   const [calendarYear, setCalendarYear] = useState(currentYear);
   const [menuOpen, setMenuOpen] = useState(false);
   const [formError, setFormError] = useState('');
+  const [origemFocused, setOrigemFocused] = useState(false);
+  const [destinoFocused, setDestinoFocused] = useState(false);
 
-  useEffect(() => {
-    if (!authLoading && !isAuthenticated) {
-      router.replace('/');
-    }
-  }, [authLoading, isAuthenticated]);
+  const filtrarLocalidades = (texto: string) => {
+    if (!texto.trim()) return LOCALIDADES_ANGOLA;
+    const lower = texto.toLowerCase();
+    return LOCALIDADES_ANGOLA.filter((p) => p.toLowerCase().includes(lower));
+  };
+
+  const origemSugestoes = origemFocused ? filtrarLocalidades(origem) : [];
+  const destinoSugestoes = destinoFocused ? filtrarLocalidades(destino) : [];
+
+  if (authLoading) {
+    return null;
+  }
+
+  if (!isAuthenticated) {
+    return <Redirect href="/" />;
+  }
 
   const monthNames = [
     'Janeiro',
@@ -296,9 +312,9 @@ export default function Dashboard() {
 
             <TouchableOpacity
               style={[styles.menuItem, styles.menuItemLogout]}
-              onPress={() => {
+              onPress={async () => {
                 setMenuOpen(false);
-                void logout();
+                await logout();
               }}
             >
               <Text style={styles.menuIcon}>⎋</Text>
@@ -308,7 +324,11 @@ export default function Dashboard() {
         </Pressable>
       )}
 
-      <View style={styles.card}>
+      <KeyboardAvoidingView
+        style={styles.card}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+      >
         {user?.nome ? (
           <Text style={styles.greeting}>Olá, {user.nome.split(' ')[0]} 👋</Text>
         ) : null}
@@ -327,17 +347,44 @@ export default function Dashboard() {
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.routeRow}>
-            <TextInput
-              style={[styles.input, styles.routeInput]}
-              placeholder="Origem"
-              placeholderTextColor={Palette.textMuted}
-              value={origem}
-              onChangeText={(v) => {
-                setOrigem(v);
-                setFormError('');
-              }}
-              accessibilityLabel="Cidade de origem"
-            />
+            <View style={[styles.routeInput, styles.autocompleteWrap]}>
+              <TextInput
+                style={[styles.input, { marginBottom: 0 }]}
+                placeholder="Origem"
+                placeholderTextColor={Palette.textMuted}
+                value={origem}
+                onChangeText={(v) => {
+                  setOrigem(v);
+                  setFormError('');
+                  setOrigemFocused(true);
+                }}
+                onFocus={() => setOrigemFocused(true)}
+                onBlur={() => setTimeout(() => setOrigemFocused(false), 150)}
+                accessibilityLabel="Cidade de origem"
+              />
+              {origemSugestoes.length > 0 && origem.length > 0 && !LOCALIDADES_ANGOLA.includes(origem) ? (
+                <View style={styles.suggestionsBox}>
+                  <ScrollView
+                    style={styles.suggestionsList}
+                    keyboardShouldPersistTaps="always"
+                    nestedScrollEnabled
+                  >
+                    {origemSugestoes.map((p) => (
+                      <TouchableOpacity
+                        key={p}
+                        style={styles.suggestionItem}
+                        onPress={() => {
+                          setOrigem(p);
+                          setOrigemFocused(false);
+                        }}
+                      >
+                        <Text style={styles.suggestionText}>{p}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+              ) : null}
+            </View>
             <TouchableOpacity
               style={styles.swapButton}
               onPress={swapOrigemDestino}
@@ -345,17 +392,44 @@ export default function Dashboard() {
             >
               <Text style={styles.swapIcon}>⇅</Text>
             </TouchableOpacity>
-            <TextInput
-              style={[styles.input, styles.routeInput]}
-              placeholder="Destino"
-              placeholderTextColor={Palette.textMuted}
-              value={destino}
-              onChangeText={(v) => {
-                setDestino(v);
-                setFormError('');
-              }}
-              accessibilityLabel="Cidade de destino"
-            />
+            <View style={[styles.routeInput, styles.autocompleteWrap]}>
+              <TextInput
+                style={[styles.input, { marginBottom: 0 }]}
+                placeholder="Destino"
+                placeholderTextColor={Palette.textMuted}
+                value={destino}
+                onChangeText={(v) => {
+                  setDestino(v);
+                  setFormError('');
+                  setDestinoFocused(true);
+                }}
+                onFocus={() => setDestinoFocused(true)}
+                onBlur={() => setTimeout(() => setDestinoFocused(false), 150)}
+                accessibilityLabel="Cidade de destino"
+              />
+              {destinoSugestoes.length > 0 && destino.length > 0 && !LOCALIDADES_ANGOLA.includes(destino) ? (
+                <View style={styles.suggestionsBox}>
+                  <ScrollView
+                    style={styles.suggestionsList}
+                    keyboardShouldPersistTaps="always"
+                    nestedScrollEnabled
+                  >
+                    {destinoSugestoes.map((p) => (
+                      <TouchableOpacity
+                        key={p}
+                        style={styles.suggestionItem}
+                        onPress={() => {
+                          setDestino(p);
+                          setDestinoFocused(false);
+                        }}
+                      >
+                        <Text style={styles.suggestionText}>{p}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+              ) : null}
+            </View>
           </View>
 
           <TouchableOpacity style={styles.inputButton} onPress={() => openDatePicker('ida')}>
@@ -488,7 +562,7 @@ export default function Dashboard() {
             <Text style={styles.buttonText}>Buscar viagens</Text>
           </TouchableOpacity>
         </ScrollView>
-      </View>
+      </KeyboardAvoidingView>
     </View>
   );
 }
@@ -513,13 +587,46 @@ const styles = StyleSheet.create({
   },
   routeRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: Spacing.sm,
     marginBottom: Spacing.lg,
+    zIndex: 10,
   },
   routeInput: {
     flex: 1,
-    marginBottom: 0,
+  },
+  autocompleteWrap: {
+    position: 'relative',
+    zIndex: 5,
+  },
+  suggestionsBox: {
+    position: 'absolute',
+    top: 50,
+    left: 0,
+    right: 0,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 12,
+    zIndex: 20,
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+  },
+  suggestionsList: {
+    maxHeight: 160,
+  },
+  suggestionItem: {
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  suggestionText: {
+    fontSize: 14,
+    color: '#333',
   },
   swapButton: {
     width: 44,

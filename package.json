@@ -3,12 +3,15 @@
   "main": "expo-router/entry",
   "version": "1.0.0",
   "scripts": {
-    "start": "expo start",
+    "start": "powershell -ExecutionPolicy Bypass -File ./scripts/start-expo.ps1",
+    "start:lan": "expo start --lan",
+    "start:tunnel": "expo start --tunnel",
     "reset-project": "node ./scripts/reset-project.js",
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "api": "powershell -ExecutionPolicy Bypass -File ./scripts/serve-api.ps1"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",

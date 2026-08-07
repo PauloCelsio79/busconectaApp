@@ -8,6 +8,7 @@ import { Brand, Palette } from '@/constants/theme';
 export default function TabLayout() {
   return (
     <Tabs
+      initialRouteName="dashboard"
       screenOptions={{
         tabBarActiveTintColor: Brand.primary,
         tabBarInactiveTintColor: Palette.textMuted,

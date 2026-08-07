@@ -1,4 +1,3 @@
-import { router } from 'expo-router';
 import {
   createContext,
   useCallback,
@@ -64,18 +63,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const register = useCallback(async (input: authApi.RegisterInput) => {
-    const created = await authApi.register(input);
-    setUser(created);
+    await authApi.register(input);
   }, []);
 
   const logout = useCallback(async () => {
-    try {
-      await authApi.logout();
-    } catch {
-      await clearToken();
-    }
+    await authApi.logout();
     setUser(null);
-    router.replace('/');
   }, []);
 
   const value = useMemo(
